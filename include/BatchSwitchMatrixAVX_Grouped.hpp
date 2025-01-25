@@ -460,7 +460,7 @@ public:
     template <size_t P>
     BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
         BatchSwitchMatrixAVX_Grouped<N, P> result{};
-        if constexpr(M*N >1000 && P > 32){
+        if constexpr(M*N >= 600*600 && P >= 600){
         __m256d *lows = new __m256d[N*M];
         __m256d *upps = new __m256d[N*M];
         char* types = new char[N*M];
@@ -534,6 +534,7 @@ public:
 
         delete[] lows;
         delete[] upps;
+        delete[] types;
         }
 
         else{
@@ -593,7 +594,7 @@ public:
         // Round up pass
         capd::rounding::DoubleRounding::roundUp();
         for (size_t i = 0; i < N; ++i) {
-            for (size_t k = 0; k < vectors_count_row; ++k) {
+            for (size_t k = 0; k < full_vectors; ++k) {
                     __m256d low = lower[i*vectors_count_row+k];
                     __m256d up = upper[i*vectors_count_row+k];
                     details::split_m256d_to_vectors(low,lows);
@@ -604,6 +605,39 @@ public:
                     details::add_max(lows[1],upps[1],fst.lower[(k*4 +1)* result.vectors_count_row + j],fst.upper[(k*4 +1) * result.vectors_count_row + j],wyn);
                     details::add_max(lows[2],upps[2],fst.lower[(k*4 +2) * result.vectors_count_row + j],fst.upper[(k*4 +2) * result.vectors_count_row + j],wyn);
                     details::add_max(lows[3],upps[3],fst.lower[(k*4 +3) * result.vectors_count_row + j],fst.upper[(k*4 +3) * result.vectors_count_row + j],wyn);
+                }
+            }
+            if constexpr(rest == 3){
+                __m256d low = lower[i*vectors_count_row+full_vectors];
+                __m256d up = upper[i*vectors_count_row+full_vectors];
+                details::split_m256d_to_vectors(low,lows);
+                details::split_m256d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                    details::add_max(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[1],upps[1],fst.lower[(full_vectors*4 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*4 +1) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[2],upps[2],fst.lower[(full_vectors*4 +2) * result.vectors_count_row + j],fst.upper[(full_vectors*4 +2) * result.vectors_count_row + j],wyn);
+                }
+            }
+            else if constexpr(rest == 2){
+                __m256d low = lower[i*vectors_count_row+full_vectors];
+                __m256d up = upper[i*vectors_count_row+full_vectors];
+                details::split_m256d_to_vectors(low,lows);
+                details::split_m256d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                    details::add_max(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[1],upps[1],fst.lower[(full_vectors*4 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*4 +1) * result.vectors_count_row + j],wyn);
+                }
+            }
+            else if constexpr(rest == 1){
+                __m256d low = lower[i*vectors_count_row+full_vectors];
+                __m256d up = upper[i*vectors_count_row+full_vectors];
+                details::split_m256d_to_vectors(low,lows);
+                details::split_m256d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                    details::add_max(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
                 }
             }
             
