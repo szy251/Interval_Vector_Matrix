@@ -26,10 +26,10 @@ private:
     __m512d* lower = nullptr;
     __m512d* upper = nullptr;
     typedef capd::intervals::Interval<double> Interval;
-    size_t vectors_count_row = (M+7)/8;
-    size_t vectors_count = vectors_count_row*N;
-    size_t full_vectors = M/8;
-    size_t rest = M % 8;
+    static constexpr size_t vectors_count_row = (M+7)/8;
+    static constexpr size_t vectors_count = vectors_count_row*N;
+    static constexpr size_t full_vectors = M/8;
+    static constexpr size_t rest = M % 8;
 
     template<size_t N1,size_t M1>
     friend class BatchSwitchMatrixAVX512_Grouped;

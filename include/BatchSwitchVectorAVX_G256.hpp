@@ -13,9 +13,9 @@ class BatchSwitchVectorAVX_G256
 private:
     __m256d* data = nullptr;
     typedef capd::intervals::Interval<double> Interval;
-    size_t vectors_count = (N+3)/4;
-    size_t full_vectors = N/4;
-    size_t rest = N % 4;
+    static constexpr size_t vectors_count = (N+3)/4;
+    static constexpr size_t full_vectors = N/4;
+    static constexpr size_t rest = N % 4;
 
     BatchSwitchVectorAVX_G256(bool allocateOnly)
     {

@@ -15,9 +15,9 @@ private:
     __m512d* lower = nullptr;
     __m512d* upper = nullptr;
     typedef capd::intervals::Interval<double> Interval;
-    size_t vectors_count = (N + 7) / 8; // Number of 512-bit vectors
-    size_t full_vectors = N / 8;        // Full vectors
-    size_t rest = N % 8;               // Remaining elements
+    static constexpr size_t vectors_count = (N + 7) / 8; // Number of 512-bit vectors
+    static constexpr size_t full_vectors = N / 8;        // Full vectors
+    static constexpr size_t rest = N % 8;               // Remaining elements
 
     BatchSwitchVectorAVX512_Grouped(bool allocateOnly)
     {
@@ -232,13 +232,11 @@ public:
     friend BatchSwitchVectorAVX512_Grouped operator+(const BatchSwitchVectorAVX512_Grouped& fst, const BatchSwitchVectorAVX512_Grouped& scd) {
         BatchSwitchVectorAVX512_Grouped result(true);
         capd::rounding::DoubleRounding::roundDown();
-        #pragma omp parallel for
         for (size_t i = 0; i < result.vectors_count; i++) {
             result.lower[i] = _mm512_add_pd(fst.lower[i], scd.lower[i]);
         }
 
         capd::rounding::DoubleRounding::roundUp();
-         #pragma omp parallel for
         for (size_t i = 0; i < result.vectors_count; i++) {
             result.upper[i] = _mm512_add_pd(fst.upper[i], scd.upper[i]);
         }
@@ -248,13 +246,11 @@ public:
     friend BatchSwitchVectorAVX512_Grouped operator-(const BatchSwitchVectorAVX512_Grouped& fst, const BatchSwitchVectorAVX512_Grouped& scd) {
         BatchSwitchVectorAVX512_Grouped result(true);
         capd::rounding::DoubleRounding::roundDown();
-        #pragma omp parallel for
         for (size_t i = 0; i < result.vectors_count; i++) {
             result.lower[i] = _mm512_sub_pd(fst.lower[i], scd.upper[i]);
         }
 
         capd::rounding::DoubleRounding::roundUp();
-        #pragma omp parallel for
         for (size_t i = 0; i < result.vectors_count; i++) {
             result.upper[i] = _mm512_sub_pd(fst.upper[i], scd.lower[i]);
         }

@@ -14,37 +14,11 @@ namespace details{
     __m256d mlt2 = _mm256_min_pd(_mm256_mul_pd(b,c),_mm256_mul_pd(b,d));
     result = _mm256_add_pd(result, _mm256_min_pd(mlt1,mlt2));
     }
-    inline void add_min1(const __m256d& a, const __m256d& b,const __m256d& c,__m256d& result){
-    __m256d mlt1 = _mm256_min_pd(_mm256_mul_pd(a,c),_mm256_mul_pd(b,c));
-    result = _mm256_add_pd(result, mlt1);
-    }
-    inline void add_min2(const __m256d& a, const __m256d& b,const __m256d& d,__m256d& result){
-    __m256d mlt1 = _mm256_min_pd(_mm256_mul_pd(a,d),_mm256_mul_pd(b,d));
-    result = _mm256_add_pd(result, mlt1);
-    }
-    inline void add_min3(const __m256d& a, const __m256d& b,const __m256d& c,const __m256d& d,__m256d& result){
-    __m256d mlt1 = _mm256_min_pd(_mm256_mul_pd(a,d),_mm256_mul_pd(b,c));
-    result = _mm256_add_pd(result, mlt1);
-    }
     inline void add_max(const __m256d& a, const __m256d& b,const __m256d& c,const __m256d& d,__m256d& result){
         __m256d mlt1 = _mm256_max_pd(_mm256_mul_pd(a,c),_mm256_mul_pd(a,d));
         __m256d mlt2 = _mm256_max_pd(_mm256_mul_pd(b,c),_mm256_mul_pd(b,d));
         result = _mm256_add_pd(result, _mm256_max_pd(mlt1,mlt2));
     }
-
-    inline void add_max1(const __m256d& a, const __m256d& b,const __m256d& d,__m256d& result){
-    __m256d mlt1 = _mm256_max_pd(_mm256_mul_pd(a,d),_mm256_mul_pd(b,d));
-    result = _mm256_add_pd(result, mlt1);
-    }
-    inline void add_max2(const __m256d& a, const __m256d& b,const __m256d& c,__m256d& result){
-    __m256d mlt1 = _mm256_max_pd(_mm256_mul_pd(a,c),_mm256_mul_pd(b,c));
-    result = _mm256_add_pd(result, mlt1);
-    }
-    inline void add_max3(const __m256d& a, const __m256d& b,const __m256d& c,const __m256d& d,__m256d& result){
-    __m256d mlt1 = _mm256_max_pd(_mm256_mul_pd(a,c),_mm256_mul_pd(b,d));
-    result = _mm256_add_pd(result, mlt1);
-    }
-
     inline void split_m256d_to_vectors(__m256d vec, __m256d* result) {
         result[0] = _mm256_permute4x64_pd(vec, 0b00000000); // Powtórz element 0
         result[1] = _mm256_permute4x64_pd(vec, 0b01010101); // Powtórz element 1
@@ -151,63 +125,6 @@ private:
             upper[index.ind+1] = vec_upper;
         }
     };
-    inline void getData(__m256d* lows, __m256d* ups,char* types){
-        alignas(32) double data[4];
-        alignas(32) double data2[4];
-        for(size_t i = 0; i < N; i++){
-            for(size_t j = 0; j<full_vectors;j++){
-                _mm256_store_pd(data,lower[i*vectors_count_row+j]);
-                _mm256_store_pd(data2,upper[i*vectors_count_row+j]);
-                lows[i*M+j*4] = _mm256_set1_pd(data[0]); // Powtórz element 0
-                lows[i*M+j*4+1] = _mm256_set1_pd(data[1]); // Powtórz element 0
-                lows[i*M+j*4+2] = _mm256_set1_pd(data[2]); // Powtórz element 0
-                lows[i*M+j*4+3] = _mm256_set1_pd(data[3]); // Powtórz element 0
-                ups[i*M+j*4] = _mm256_set1_pd(data2[0]); // Powtórz element 0
-                ups[i*M+j*4+1] = _mm256_set1_pd(data2[1]); // Powtórz element 0
-                ups[i*M+j*4+2] = _mm256_set1_pd(data2[2]); // Powtórz element 0
-                ups[i*M+j*4+3] = _mm256_set1_pd(data2[3]); // Powtórz element 0
-                types[i*M+j*4] = type_mtrx(data[0],data2[0]); // Powtórz element 0
-                types[i*M+j*4+1] = type_mtrx(data[1],data2[1]); // Powtórz element 0
-                types[i*M+j*4+2] = type_mtrx(data[2],data2[2]); // Powtórz element 0
-                types[i*M+j*4+3] = type_mtrx(data[3],data2[3]); // Powtórz element 0
-            }
-            if constexpr (rest == 1){
-                _mm256_store_pd(data,lower[i*vectors_count_row+full_vectors]);
-                _mm256_store_pd(data2,upper[i*vectors_count_row+full_vectors]);
-                lows[(i+1)*M-1] = _mm256_set1_pd(data[0]);
-                ups[(i+1)*M-1] = _mm256_set1_pd(data2[0]);
-                types[(i+1)*M-1] = type_mtrx(data[0],data2[0]);
-            }
-            else if constexpr(rest == 2){
-                _mm256_store_pd(data,lower[i*vectors_count_row+full_vectors]);
-                _mm256_store_pd(data2,upper[i*vectors_count_row+full_vectors]);
-                
-                lows[(i+1)*M-2] = _mm256_set1_pd(data[0]);
-                ups[(i+1)*M-2] = _mm256_set1_pd(data2[0]);
-                types[(i+1)*M-2] = type_mtrx(data[0],data2[0]);
-
-                lows[(i+1)*M-1] = _mm256_set1_pd(data[1]);
-                ups[(i+1)*M-1] = _mm256_set1_pd(data2[1]);
-                types[(i+1)*M-1] = type_mtrx(data[1],data2[1]);
-            }
-            else if constexpr (rest == 3){
-                _mm256_store_pd(data,lower[i*vectors_count_row+full_vectors]);
-                _mm256_store_pd(data2,upper[i*vectors_count_row+full_vectors]);
-                
-                lows[(i+1)*M-3] = _mm256_set1_pd(data[0]);
-                ups[(i+1)*M-3] = _mm256_set1_pd(data2[0]);
-                types[(i+1)*M-3] = type_mtrx(data[0],data2[0]);
-
-                lows[(i+1)*M-2] = _mm256_set1_pd(data[1]);
-                ups[(i+1)*M-2] = _mm256_set1_pd(data2[1]);
-                types[(i+1)*M-2] = type_mtrx(data[1],data2[1]);
-
-                lows[(i+1)*M-1] = _mm256_set1_pd(data[2]);
-                ups[(i+1)*M-1] = _mm256_set1_pd(data2[2]);
-                types[(i+1)*M-1] = type_mtrx(data[2],data2[2]);
-            }
-        }
-    }
 public:
     BatchSwitchMatrixAVX_Grouped(){
         lower = new alignas(32) __m256d[vectors_count]();
@@ -460,84 +377,6 @@ public:
     template <size_t P>
     BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
         BatchSwitchMatrixAVX_Grouped<N, P> result{};
-        if constexpr(M*N >= 600*600 && P >= 600){
-        __m256d *lows = new __m256d[N*M];
-        __m256d *upps = new __m256d[N*M];
-        char* types = new char[N*M];
-        this->getData(lows,upps,types);
-        // Round down pass
-        //(i,k), (j,k)
-        capd::rounding::DoubleRounding::roundDown();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t k = 0; k < M; ++k) {
-                    __m256d low = lows[i*M+k];
-                    __m256d up = upps[i*M+k];
-                    char type = types[i*M+k];
-                    switch(type){
-                        case 1:{
-                            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                                details::add_min1(low,up,fst.lower[k* result.vectors_count_row + j],result.lower[i * result.vectors_count_row + j]);
-                            }
-                            break;
-                        }
-                        case 2:{
-                            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                                details::add_min2(low,up,fst.upper[k* result.vectors_count_row + j],result.lower[i * result.vectors_count_row + j]);
-                            }
-                            break;
-                        }
-                        case 3:{
-                            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                                details::add_min3(low,up,fst.lower[k* result.vectors_count_row + j],fst.upper[k* result.vectors_count_row + j],result.lower[i * result.vectors_count_row + j]);
-                            }
-                            break;
-                        }
-                        default:
-                            break;
-                    }
-            }
-            
-        }
-
-        // Round up pass
-        capd::rounding::DoubleRounding::roundUp();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t k = 0; k < M; ++k) {
-                    __m256d low = lows[i*M+k];
-                    __m256d up = upps[i*M+k];
-                    char type = types[i*M+k];
-                    switch(type){
-                        case 1:{
-                            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                                details::add_max1(low,up,fst.upper[k* result.vectors_count_row + j],result.upper[i * result.vectors_count_row + j]);
-                            }
-                            break;
-                        }
-                        case 2:{
-                            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                                details::add_max2(low,up,fst.lower[k* result.vectors_count_row + j],result.upper[i * result.vectors_count_row + j]);
-                            }
-                            break;
-                        }
-                        case 3:{
-                            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                                details::add_max3(low,up,fst.lower[k* result.vectors_count_row + j],fst.upper[k* result.vectors_count_row + j],result.upper[i * result.vectors_count_row + j]);
-                            }
-                            break;
-                        }
-                        default:
-                            break;
-                    }
-            }
-            
-        }
-
-        delete[] lows;
-        delete[] upps;
-        delete[] types;
-        }
-
-        else{
         alignas(32) __m256d lows[4];
         alignas(32) __m256d upps[4];
         capd::rounding::DoubleRounding::roundDown();
@@ -641,7 +480,6 @@ public:
                 }
             }
             
-        }
         }
         return result;
     }

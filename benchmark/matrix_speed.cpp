@@ -501,6 +501,34 @@ static void BM_MLT_1200_1200_BATCH_GRP_AVX512(benchmark::State& state) {
 }
 BENCHMARK(BM_MLT_1200_1200_BATCH_GRP_AVX512);
 
+static void BM_MLT_2400_2400_BATCH_GRP_AVX(benchmark::State& state) {
+    const size_t array_size = 2400*2400; 
+    auto intervals = generateArray(array_size,42);
+    auto intervals2 = generateArray(array_size,143);
+    BatchSwitchMatrixAVX_Grouped<2400,2400> matrix1(intervals);
+    BatchSwitchMatrixAVX_Grouped<2400,2400> matrix2(intervals2);
+    for (auto _ : state) {
+       auto a = matrix1 * matrix2; 
+       benchmark::DoNotOptimize(a);
+    }
+}
+BENCHMARK(BM_MLT_2400_2400_BATCH_GRP_AVX);
+
+static void BM_MLT_2400_2400_BATCH_GRP_AVX512(benchmark::State& state) {
+    const size_t array_size = 2400*2400; 
+    auto intervals = generateArray(array_size,42);
+    auto intervals2 = generateArray(array_size,143);
+    BatchSwitchMatrixAVX512_Grouped<2400,2400> matrix1(intervals);
+    BatchSwitchMatrixAVX512_Grouped<2400,2400> matrix2(intervals2);
+    for (auto _ : state) {
+       auto a = matrix1 * matrix2; 
+       benchmark::DoNotOptimize(a);
+    }
+}
+BENCHMARK(BM_MLT_2400_2400_BATCH_GRP_AVX512);
+
+
+
 // static void BM_Addition_BareInterval(benchmark::State& state) {
 //     const size_t array_size = 1000; // Około 100 MB
 //     std::vector<opt::Interval> intervals;
