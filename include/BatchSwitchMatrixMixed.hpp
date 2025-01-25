@@ -357,43 +357,65 @@ class BatchSwitchMatrixMixed{
                 size_t idx1 = i * M + k;
                 double low =  data[idx1*2];
                 double upp = data[idx1*2+1];
-                for (size_t j = 0; j < P; ++j) {
-                    size_t idx2 = k * P + j;
-
-                    char type1 = a_type[idx1];
-                    char type2 = b_type[idx2];
-
-                    if (type1 == 0 || type2 == 0) {
-                        continue;
-                    }
-
+                char type1 = a_type[idx1];
                     switch (type1) {
-                        case 1:
-                            if (type2 == 1) tmp = low * fst.data[idx2*2];
-                            else tmp =  upp * fst.data[idx2*2];
+                        case 1:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                                if (type2 == 1) tmp = low * fst.data[idx2*2];
+                                else tmp =  upp * fst.data[idx2*2];
+                                result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+                            }
                             break;
-                        case 2:
-                            if (type2 == 2) tmp =  upp * fst.data[idx2*2+1];
-                            else tmp =  low * fst.data[idx2*2+1];
+                        }
+                        case 2:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                            if (type2 == 1) tmp = upp* fst.data[idx2*2];
+                            else tmp = low * fst.data[idx2*2];
+                            result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+                            }
                             break;
-                        default:
-                            switch (type2) {
+                        }
+                        case 3:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                               switch (type2) {
                                 case 1:
                                     tmp =  low * fst.data[idx2*2+1];
                                     break;
                                 case 2:
                                     tmp =  upp * fst.data[idx2*2];
                                     break;
-                                default:
+                                case 3:{
                                     double t = low * fst.data[idx2*2+1];
                                     double z = upp * fst.data[idx2*2];
                                     tmp =  std::min(t, z);
                                     break;
+                                }
+                                default:
+                                    continue;
+                                }
+                                result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
                             }
                             break;
-                    }
-                    result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
-                }
+                        }
+                    }   
             }
         }
 
@@ -404,43 +426,65 @@ class BatchSwitchMatrixMixed{
                 size_t idx1 = i * M + k;
                 double low =  data[idx1*2];
                 double upp = data[idx1*2+1];
-                for (size_t j = 0; j < P; ++j) {
-                    size_t idx2 = k * P + j;
-
-                    char type1 = a_type[idx1];
-                    char type2 = b_type[idx2];
-
-                    if (type1 == 0 || type2 == 0) {
-                        continue;
-                    }
-
+                char type1 = a_type[idx1];
                     switch (type1) {
-                        case 1:
-                            if (type2 == 2) tmp = low * fst.data[idx2*2+1];
-                            else tmp = upp * fst.data[idx2*2+1];
+                        case 1:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                                if (type2 == 2) tmp = low * fst.data[idx2*2+1];
+                                else tmp = upp * fst.data[idx2*2+1];
+                                result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
+                            }
                             break;
-                        case 2:
+                        }
+                        case 2:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
                             if (type2 == 1) tmp = upp* fst.data[idx2*2];
                             else tmp = low * fst.data[idx2*2];
+                            result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
+                            }
                             break;
-                        default:
-                            switch (type2) {
+                        }
+                        case 3:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                               switch (type2) {
                                 case 1:
                                     tmp = upp * fst.data[idx2*2+1];
                                     break;
                                 case 2:
                                     tmp = low * fst.data[idx2*2];
                                     break;
-                                default:
+                                case 3:{
                                     double t = low * fst.data[idx2*2];
                                     double z = upp * fst.data[idx2*2+1];
                                     tmp = std::max(t, z);
                                     break;
+                                }
+                                default:
+                                    continue;
+                            }
+                                result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
                             }
                             break;
-                    }
-                    result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
-                }
+                        }
+                    }   
             }
         }
 

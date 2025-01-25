@@ -382,43 +382,65 @@ public:
                 size_t idx1 = i * M + k;
                 double lower =  low[idx1];
                 double upp = up[idx1];
-                for (size_t j = 0; j < P; ++j) {
-                    size_t idx2 = k * P +j;
-
-                    char type1 = a_type[idx1];
-                    char type2 = b_type[idx2];
-
-                    if (type1 == 0 || type2 == 0) {
-                        continue;
-                    }
-
+                char type1 = a_type[idx1];
                     switch (type1) {
-                        case 1:
-                            if (type2 == 1) tmp = lower * fst.low[idx2];
-                            else tmp= upp * fst.low[idx2];
-                            break;
-                        case 2:
-                            if (type2 == 2) tmp =  upp * fst.up[idx2];
-                            else tmp= lower * fst.up[idx2];
-                            break;
-                        default:
-                            switch (type2) {
-                                case 1:
-                                    tmp = lower * fst.up[idx2];
-                                    break;
-                                case 2:
-                                    tmp = upp * fst.low[idx2];
-                                    break;
-                                default:
-                                    double t = lower * fst.up[idx2];
-                                    double z = upp * fst.low[idx2];
-                                    tmp = std::min(t, z);
-                                    break;
+                        case 1:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                                if (type2 == 1) tmp = lower * fst.low[idx2];
+                                else tmp= upp * fst.low[idx2];
+                                result.low[i * P + j] = result.low[i * P + j] + tmp;
                             }
                             break;
-                    }
-                    result.low[i * P + j] = result.low[i * P + j] + tmp;
-                }
+                        }
+                        case 2:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                            if (type2 == 2) tmp =  upp * fst.up[idx2];
+                            else tmp= lower * fst.up[idx2];
+                            result.low[i * P + j] = result.low[i * P + j] + tmp;
+                            }
+                            break;
+                        }
+                        case 3:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                switch (type2) {
+                                    case 1:
+                                        tmp = lower * fst.up[idx2];
+                                        break;
+                                    case 2:
+                                        tmp = upp * fst.low[idx2];
+                                        break;
+                                    case 3:{
+                                        double t = lower * fst.up[idx2];
+                                        double z = upp * fst.low[idx2];
+                                        tmp = std::min(t, z);
+                                        break;
+                                    }
+                                    default:
+                                        continue;
+                                }
+                                result.low[i * P + j] = result.low[i * P + j] + tmp;
+                            }
+                            break;
+                        }
+                    }   
             }
         }
 
@@ -429,43 +451,66 @@ public:
                 size_t idx1 = i * M + k;
                 double lower =  low[idx1];
                 double upp = up[idx1];
-                for (size_t j = 0; j < P; ++j) {
-                    size_t idx2 = k * P + j;
-
-                    char type1 = a_type[idx1];
-                    char type2 = b_type[idx2];
-
-                    if (type1 == 0 || type2 == 0) {
-                        continue;
-                    }
-
+                char type1 = a_type[idx1];
                     switch (type1) {
-                        case 1:
-                            if (type2 == 2) tmp = lower * fst.up[idx2];
-                            else tmp = upp * fst.up[idx2];
+                        case 1:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                                if (type2 == 2) tmp = lower * fst.up[idx2];
+                                else tmp = upp * fst.up[idx2];
+                                result.up[i * P + j] = result.up[i * P + j] + tmp;
+                            }
                             break;
-                        case 2:
-                            if (type2 == 1) tmp = upp * fst.low[idx2];
-                            else tmp = lower * fst.low[idx2];
+                        }
+                        case 2:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                if (type2 == 0) {
+                                    continue;
+                                }
+                                if (type2 == 1) tmp = upp * fst.low[idx2];
+                                else tmp = lower * fst.low[idx2];
+                                result.up[i * P + j] = result.up[i * P + j] + tmp;
+                            }
                             break;
-                        default:
-                            switch (type2) {
+                        }
+                        case 3:{
+                            for (size_t j = 0; j < P; ++j) {
+                                size_t idx2 = k * P +j;
+
+                                char type2 = b_type[idx2];
+
+                                switch (type2) {
                                 case 1:
                                     tmp = upp * fst.up[idx2];
                                     break;
                                 case 2:
                                     tmp = lower * fst.low[idx2];
                                     break;
-                                default:
+                                case 3:{
                                     double t = lower * fst.low[idx2];
                                     double z = upp * fst.up[idx2];
                                     tmp = std::max(t, z);
                                     break;
+                                }
+                                default:
+                                    continue;
+                                }
+                                result.up[i * P + j] = result.up[i * P + j] + tmp;
                             }
                             break;
+                        }
                     }
-                    result.up[i * P + j] = result.up[i * P + j] + tmp;
-                }
+                    
             }
         }
 
