@@ -7,6 +7,7 @@
 #include <IntervalProxy.hpp>
 #include <MatrixBasic.hpp>
 #include <immintrin.h>
+#include <omp.h>
 
 namespace details{
     inline void add_min(const __m256d& a, const __m256d& b,const __m256d& c,const __m256d& d,__m256d& result){
@@ -375,114 +376,174 @@ public:
     // }
 
     template <size_t P>
-    BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
-        BatchSwitchMatrixAVX_Grouped<N, P> result{};
+BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
+    BatchSwitchMatrixAVX_Grouped<N, P> result{};
+
+    // Warunek aktywacji równoległości (możesz dostosować próg 30)
+    static constexpr bool enable_parallel = (N >= 24) && (M >= 24) && (P >=24);
+
+    // Blok równoległy zależny od constexpr
+    if constexpr(enable_parallel){
+        #pragma omp parallel
+        {
+            capd::rounding::DoubleRounding::roundDown();
+
+            // Pętla zewnętrzna - równoległa tylko dla dużych macierzy
+            #pragma omp for
+            for (size_t i = 0; i < N; ++i) {
+                alignas(32) __m256d lows[4];
+                alignas(32) __m256d upps[4];
+                
+                // Główna część - pełne wektory
+                for (size_t k = 0; k < full_vectors; ++k) {
+                    __m256d low = lower[i*vectors_count_row + k];
+                    __m256d up = upper[i*vectors_count_row + k];
+                    details::split_m256d_to_vectors(low, lows);
+                    details::split_m256d_to_vectors(up, upps);
+                    
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                        details::add_min(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
+                        details::add_min(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
+                        details::add_min(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
+                        details::add_min(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
+                    }
+                }
+                
+                // Reszta (0-3 elementy)
+                if constexpr (rest > 0) {
+                    __m256d low = lower[i*vectors_count_row + full_vectors];
+                    __m256d up = upper[i*vectors_count_row + full_vectors];
+                    details::split_m256d_to_vectors(low, lows);
+                    details::split_m256d_to_vectors(up, upps);
+                    
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                        if constexpr (rest >= 1) details::add_min(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
+                        if constexpr (rest >= 2) details::add_min(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
+                        if constexpr (rest >= 3) details::add_min(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
+                    }
+                }
+            }
+
+            #pragma omp barrier
+
+            // Część z zaokrąglaniem w górę
+            capd::rounding::DoubleRounding::roundUp();
+            
+            #pragma omp for
+            for (size_t i = 0; i < N; ++i) {
+                alignas(32) __m256d lows[4];
+                alignas(32) __m256d upps[4];
+                
+                for (size_t k = 0; k < full_vectors; ++k) {
+                    __m256d low = lower[i*vectors_count_row + k];
+                    __m256d up = upper[i*vectors_count_row + k];
+                    details::split_m256d_to_vectors(low, lows);
+                    details::split_m256d_to_vectors(up, upps);
+                    
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m256d& wyn = result.upper[i * result.vectors_count_row + j];
+                        details::add_max(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
+                        details::add_max(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
+                        details::add_max(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
+                        details::add_max(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
+                    }
+                }
+                
+                if constexpr (rest > 0) {
+                    __m256d low = lower[i*vectors_count_row + full_vectors];
+                    __m256d up = upper[i*vectors_count_row + full_vectors];
+                    details::split_m256d_to_vectors(low, lows);
+                    details::split_m256d_to_vectors(up, upps);
+                    
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m256d& wyn = result.upper[i * result.vectors_count_row + j];
+                        if constexpr (rest >= 1) details::add_max(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
+                        if constexpr (rest >= 2) details::add_max(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
+                        if constexpr (rest >= 3) details::add_max(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
+                    }
+                }
+            }
+        }
+    }
+    else{
+        // Część z zaokrąglaniem w dół
+        capd::rounding::DoubleRounding::roundDown();
         alignas(32) __m256d lows[4];
         alignas(32) __m256d upps[4];
-        capd::rounding::DoubleRounding::roundDown();
         for (size_t i = 0; i < N; ++i) {
+            
+            // Główna część - pełne wektory
             for (size_t k = 0; k < full_vectors; ++k) {
-                    __m256d low = lower[i*vectors_count_row+k];
-                    __m256d up = upper[i*vectors_count_row+k];
-                    details::split_m256d_to_vectors(low,lows);
-                    details::split_m256d_to_vectors(up,upps);
+                __m256d low = lower[i*vectors_count_row + k];
+                __m256d up = upper[i*vectors_count_row + k];
+                details::split_m256d_to_vectors(low, lows);
+                details::split_m256d_to_vectors(up, upps);
+                
                 for (size_t j = 0; j < result.vectors_count_row; ++j) {
                     __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_min(lows[0],upps[0],fst.lower[k*4 * result.vectors_count_row + j],fst.upper[k*4 * result.vectors_count_row + j],wyn);
-                    details::add_min(lows[1],upps[1],fst.lower[(k*4 +1)* result.vectors_count_row + j],fst.upper[(k*4 +1) * result.vectors_count_row + j],wyn);
-                    details::add_min(lows[2],upps[2],fst.lower[(k*4 +2) * result.vectors_count_row + j],fst.upper[(k*4 +2) * result.vectors_count_row + j],wyn);
-                    details::add_min(lows[3],upps[3],fst.lower[(k*4 +3) * result.vectors_count_row + j],fst.upper[(k*4 +3) * result.vectors_count_row + j],wyn);
-                }
-            }
-            if constexpr(rest == 3){
-                __m256d low = lower[i*vectors_count_row+full_vectors];
-                __m256d up = upper[i*vectors_count_row+full_vectors];
-                details::split_m256d_to_vectors(low,lows);
-                details::split_m256d_to_vectors(up,upps);
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_min(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
-                    details::add_min(lows[1],upps[1],fst.lower[(full_vectors*4 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*4 +1) * result.vectors_count_row + j],wyn);
-                    details::add_min(lows[2],upps[2],fst.lower[(full_vectors*4 +2) * result.vectors_count_row + j],fst.upper[(full_vectors*4 +2) * result.vectors_count_row + j],wyn);
-                }
-            }
-            else if constexpr(rest == 2){
-                __m256d low = lower[i*vectors_count_row+full_vectors];
-                __m256d up = upper[i*vectors_count_row+full_vectors];
-                details::split_m256d_to_vectors(low,lows);
-                details::split_m256d_to_vectors(up,upps);
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_min(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
-                    details::add_min(lows[1],upps[1],fst.lower[(full_vectors*4 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*4 +1) * result.vectors_count_row + j],wyn);
-                }
-            }
-            else if constexpr(rest == 1){
-                __m256d low = lower[i*vectors_count_row+full_vectors];
-                __m256d up = upper[i*vectors_count_row+full_vectors];
-                details::split_m256d_to_vectors(low,lows);
-                details::split_m256d_to_vectors(up,upps);
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_min(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
+                    details::add_min(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
+                    details::add_min(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
+                    details::add_min(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
                 }
             }
             
+            // Reszta (0-3 elementy)
+            if constexpr (rest > 0) {
+                __m256d low = lower[i*vectors_count_row + full_vectors];
+                __m256d up = upper[i*vectors_count_row + full_vectors];
+                details::split_m256d_to_vectors(low, lows);
+                details::split_m256d_to_vectors(up, upps);
+                
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                    if constexpr (rest >= 1) details::add_min(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
+                    if constexpr (rest >= 2) details::add_min(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
+                    if constexpr (rest >= 3) details::add_min(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
+                }
+            }
         }
 
-        // Round up pass
+
+        // Część z zaokrąglaniem w górę
         capd::rounding::DoubleRounding::roundUp();
+        
         for (size_t i = 0; i < N; ++i) {
+            
             for (size_t k = 0; k < full_vectors; ++k) {
-                    __m256d low = lower[i*vectors_count_row+k];
-                    __m256d up = upper[i*vectors_count_row+k];
-                    details::split_m256d_to_vectors(low,lows);
-                    details::split_m256d_to_vectors(up,upps);
+                __m256d low = lower[i*vectors_count_row + k];
+                __m256d up = upper[i*vectors_count_row + k];
+                details::split_m256d_to_vectors(low, lows);
+                details::split_m256d_to_vectors(up, upps);
+                
                 for (size_t j = 0; j < result.vectors_count_row; ++j) {
                     __m256d& wyn = result.upper[i * result.vectors_count_row + j];
-                    details::add_max(lows[0],upps[0],fst.lower[k*4 * result.vectors_count_row + j],fst.upper[k*4 * result.vectors_count_row + j],wyn);
-                    details::add_max(lows[1],upps[1],fst.lower[(k*4 +1)* result.vectors_count_row + j],fst.upper[(k*4 +1) * result.vectors_count_row + j],wyn);
-                    details::add_max(lows[2],upps[2],fst.lower[(k*4 +2) * result.vectors_count_row + j],fst.upper[(k*4 +2) * result.vectors_count_row + j],wyn);
-                    details::add_max(lows[3],upps[3],fst.lower[(k*4 +3) * result.vectors_count_row + j],fst.upper[(k*4 +3) * result.vectors_count_row + j],wyn);
-                }
-            }
-            if constexpr(rest == 3){
-                __m256d low = lower[i*vectors_count_row+full_vectors];
-                __m256d up = upper[i*vectors_count_row+full_vectors];
-                details::split_m256d_to_vectors(low,lows);
-                details::split_m256d_to_vectors(up,upps);
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_max(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
-                    details::add_max(lows[1],upps[1],fst.lower[(full_vectors*4 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*4 +1) * result.vectors_count_row + j],wyn);
-                    details::add_max(lows[2],upps[2],fst.lower[(full_vectors*4 +2) * result.vectors_count_row + j],fst.upper[(full_vectors*4 +2) * result.vectors_count_row + j],wyn);
-                }
-            }
-            else if constexpr(rest == 2){
-                __m256d low = lower[i*vectors_count_row+full_vectors];
-                __m256d up = upper[i*vectors_count_row+full_vectors];
-                details::split_m256d_to_vectors(low,lows);
-                details::split_m256d_to_vectors(up,upps);
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_max(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
-                    details::add_max(lows[1],upps[1],fst.lower[(full_vectors*4 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*4 +1) * result.vectors_count_row + j],wyn);
-                }
-            }
-            else if constexpr(rest == 1){
-                __m256d low = lower[i*vectors_count_row+full_vectors];
-                __m256d up = upper[i*vectors_count_row+full_vectors];
-                details::split_m256d_to_vectors(low,lows);
-                details::split_m256d_to_vectors(up,upps);
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_max(lows[0],upps[0],fst.lower[full_vectors*4 * result.vectors_count_row + j],fst.upper[full_vectors*4 * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
+                    details::add_max(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
+                    details::add_max(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
+                    details::add_max(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
                 }
             }
             
+            if constexpr (rest > 0) {
+                __m256d low = lower[i*vectors_count_row + full_vectors];
+                __m256d up = upper[i*vectors_count_row + full_vectors];
+                details::split_m256d_to_vectors(low, lows);
+                details::split_m256d_to_vectors(up, upps);
+                
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m256d& wyn = result.upper[i * result.vectors_count_row + j];
+                    if constexpr (rest >= 1) details::add_max(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
+                    if constexpr (rest >= 2) details::add_max(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
+                    if constexpr (rest >= 3) details::add_max(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
+                }
+            }
         }
-        return result;
     }
+    return result;
+}
     BatchSwitchMatrixAVX_Grouped & operator+=(const BatchSwitchMatrixAVX_Grouped& fst){
         *this = *this+fst;
         return *this;

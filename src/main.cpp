@@ -45,17 +45,17 @@ int main() {
     //     }
     //     printf("\n");
     // }
-
-
-    const size_t array_size = 16*13; // 10x10 macierz = 100 elementów
+    static const size_t N = 300;
+    static const size_t M= 300;
+    const size_t array_size = N*M; // 10x10 macierz = 100 elementów
     auto intervals = generateArray(array_size,42);
     auto intervals2 = generateArray(array_size,143);
     // Macierze 10x10
-    MatrixBasic<capd::intervals::Interval<double>, 16, 13> matrix1(intervals);
-    MatrixBasic<capd::intervals::Interval<double>, 13, 16> matrix2(intervals2);
+    MatrixBasic<capd::intervals::Interval<double>, N, M> matrix1(intervals);
+    MatrixBasic<capd::intervals::Interval<double>, M, N> matrix2(intervals2);
 
-    BatchSwitchMatrixAVX_Grouped<16,13> mtr1(intervals);
-    BatchSwitchMatrixAVX_Grouped<13,16> mtr2(intervals2);
+    BatchSwitchMatrixAVX512_Grouped<N, M> mtr1(intervals);
+    BatchSwitchMatrixAVX512_Grouped<M, N> mtr2(intervals2);
 
     //BatchSwitchMatrixMixed<10,10> mtr3(intervals);
     //BatchSwitchMatrixMixed<10,10> mtr4(intervals2);
@@ -67,7 +67,7 @@ int main() {
 
     std::cout << std::fixed << std::setprecision(17);
 
-   std::cout << mtr11(0,0) << " " << matrix11[0] << std::endl;
+   std::cout << mtr11(0,3) << " " << matrix11(0,3) << std::endl;
     if(mtr11==matrix11){
         std::cout << "dobrze";
     }

@@ -5,19 +5,31 @@
 #include <capd/intervals/Interval.hpp>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
+#include <MatrixBasic.hpp>
+#include <omp.h>
 #include <immintrin.h>
 
 namespace details{
     inline void add_min(const __m512d & a, const __m512d& b,const __m512d& c,const __m512d& d,__m512d& result){
     __m512d mlt1 = _mm512_min_pd(_mm512_mul_pd(a,c),_mm512_mul_pd(a,d));
     __m512d mlt2 = _mm512_min_pd(_mm512_mul_pd(b,c),_mm512_mul_pd(b,d));
-    result = _mm512_add_pd(_mm512_min_pd(mlt1,mlt2),result);
+    result = _mm512_add_pd(result,_mm512_min_pd(mlt1,mlt2));
     }
     inline void add_max(const __m512d& a, const __m512d& b,const __m512d& c,const __m512d& d,__m512d& result){
         __m512d mlt1 = _mm512_max_pd(_mm512_mul_pd(a,c),_mm512_mul_pd(a,d));
         __m512d mlt2 = _mm512_max_pd(_mm512_mul_pd(b,c),_mm512_mul_pd(b,d));
-        result = _mm512_add_pd(_mm512_max_pd(mlt1,mlt2),result);
+        result = _mm512_add_pd(result,_mm512_max_pd(mlt1,mlt2));
     }
+    inline void split_m512d_to_vectors(__m512d vec, __m512d* result) {
+    result[0] = _mm512_permutexvar_pd(_mm512_set1_epi64(0), vec); // Powtórz element 0
+    result[1] = _mm512_permutexvar_pd(_mm512_set1_epi64(1), vec); // Powtórz element 1
+    result[2] = _mm512_permutexvar_pd(_mm512_set1_epi64(2), vec); // Powtórz element 2
+    result[3] = _mm512_permutexvar_pd(_mm512_set1_epi64(3), vec); // Powtórz element 3
+    result[4] = _mm512_permutexvar_pd(_mm512_set1_epi64(4), vec); // Powtórz element 4
+    result[5] = _mm512_permutexvar_pd(_mm512_set1_epi64(5), vec); // Powtórz element 5
+    result[6] = _mm512_permutexvar_pd(_mm512_set1_epi64(6), vec); // Powtórz element 6
+    result[7] = _mm512_permutexvar_pd(_mm512_set1_epi64(7), vec); // Powtórz element 7
+}
 }
 template<size_t N, size_t M>
 class BatchSwitchMatrixAVX512_Grouped
@@ -77,7 +89,7 @@ private:
             break;
         case 3:
             low_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_lower,0b00000011));
-            upp_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_lower,0b00000011));
+            upp_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_upper,0b00000011));
             break;
         case 2:
             low_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_lower,0b00000010));
@@ -328,98 +340,298 @@ public:
         }
         return result;
     }
+    // template <size_t P>
+    // BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Grouped<M, P>& fst) {
+    //     BatchSwitchMatrixAVX512_Grouped<N, P> result(true);
+    //     auto pom = reorg(fst);
+    //     alignas(64) double sum[8];
+
+    //     __m512d * one_lower= fst.lower;
+    //     __m512d * two_lower= fst.lower + vectors_count/8;
+    //     __m512d * three_lower= fst.lower + vectors_count/4;
+    //     __m512d * four_lower= fst.lower + vectors_count*3/8;
+    //     __m512d * five_lower= fst.lower + vectors_count/2;
+    //     __m512d * six_lower= fst.lower + vectors_count*5/8;
+    //     __m512d * seven_lower= fst.lower + vectors_count*3/4;
+    //     __m512d * eight_lower= fst.lower + vectors_count*7/8;
+
+    //     __m512d * one_upper= fst.upper;
+    //     __m512d * two_upper= fst.upper + vectors_count/4;
+    //     __m512d * three_upper= fst.upper + vectors_count/2;
+    //     __m512d * four_upper= fst.upper + vectors_count*3/4;
+    //     __m512d * five_upper= fst.upper + vectors_count/2;
+    //     __m512d * six_upper= fst.upper + vectors_count*5/8;
+    //     __m512d * seven_upper= fst.upper + vectors_count*3/4;
+    //     __m512d * eight_upper= fst.upper + vectors_count*7/8;
+    //     // Round down pass
+    //     //(i,k), (j,k)
+    //     capd::rounding::DoubleRounding::roundDown();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t j = 0; j < result.vectors_count_row; ++j) {
+    //             __m512d sum1 = _mm512_setzero_pd(), sum2 = _mm512_setzero_pd(),sum3 = _mm512_setzero_pd(),sum4 = _mm512_setzero_pd(),
+    //                     sum5 = _mm512_setzero_pd(), sum6 = _mm512_setzero_pd(),sum7 = _mm512_setzero_pd(),sum8 = _mm512_setzero_pd();
+    //             for (size_t k = 0; k < vectors_count_row; ++k) {
+    //                 __m512d low = lower[i*vectors_count_row+k];
+    //                 __m512d up = upper[i*vectors_count_row+k];
+    //                 details::add_min(low,up,one_lower[j*vectors_count_row+k],one_upper[j*vectors_count_row+k],sum1);
+    //                 details::add_min(low,up,two_lower[j*vectors_count_row+k],two_upper[j*vectors_count_row+k],sum2);
+    //                 details::add_min(low,up,three_lower[j*vectors_count_row+k],three_upper[j*vectors_count_row+k],sum3);
+    //                 details::add_min(low,up,four_lower[j*vectors_count_row+k],four_upper[j*vectors_count_row+k],sum4);
+
+    //                 details::add_min(low,up,five_lower[j*vectors_count_row+k],five_upper[j*vectors_count_row+k],sum5);
+    //                 details::add_min(low,up,six_lower[j*vectors_count_row+k],six_upper[j*vectors_count_row+k],sum6);
+    //                 details::add_min(low,up,seven_lower[j*vectors_count_row+k],seven_upper[j*vectors_count_row+k],sum7);
+    //                 details::add_min(low,up,eight_lower[j*vectors_count_row+k],eight_upper[j*vectors_count_row+k],sum8);
+    //             }
+    //             sum[0]  = _mm512_reduce_add_pd(sum1);
+    //             sum[1]  = _mm512_reduce_add_pd(sum2);
+    //             sum[2]  = _mm512_reduce_add_pd(sum3);
+    //             sum[3]  = _mm512_reduce_add_pd(sum4);
+    //             sum[4]  = _mm512_reduce_add_pd(sum5);
+    //             sum[5]  = _mm512_reduce_add_pd(sum6);
+    //             sum[6]  = _mm512_reduce_add_pd(sum7);
+    //             sum[7]  = _mm512_reduce_add_pd(sum8);
+
+    //             result.lower[i * result.vectors_count_row + j] = _mm512_load_pd(&sum[0]);
+    //         }
+            
+    //     }
+
+    //     // Round up pass
+    //     capd::rounding::DoubleRounding::roundUp();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t j = 0; j < result.vectors_count_row; ++j) {
+    //             __m512d sum1 = _mm512_setzero_pd(), sum2 = _mm512_setzero_pd(),sum3 = _mm512_setzero_pd(),sum4 = _mm512_setzero_pd(),
+    //                     sum5 = _mm512_setzero_pd(), sum6 = _mm512_setzero_pd(),sum7 = _mm512_setzero_pd(),sum8 = _mm512_setzero_pd();
+    //             for (size_t k = 0; k < vectors_count_row; ++k) {
+    //                 __m512d low = lower[i*vectors_count_row+k];
+    //                 __m512d up = upper[i*vectors_count_row+k];
+    //                 details::add_max(low,up,one_lower[j*vectors_count_row+k],one_upper[j*vectors_count_row+k],sum1);
+    //                 details::add_max(low,up,two_lower[j*vectors_count_row+k],two_upper[j*vectors_count_row+k],sum2);
+    //                 details::add_max(low,up,three_lower[j*vectors_count_row+k],three_upper[j*vectors_count_row+k],sum3);
+    //                 details::add_max(low,up,four_lower[j*vectors_count_row+k],four_upper[j*vectors_count_row+k],sum4);
+
+    //                 details::add_max(low,up,five_lower[j*vectors_count_row+k],five_upper[j*vectors_count_row+k],sum5);
+    //                 details::add_max(low,up,six_lower[j*vectors_count_row+k],six_upper[j*vectors_count_row+k],sum6);
+    //                 details::add_max(low,up,seven_lower[j*vectors_count_row+k],seven_upper[j*vectors_count_row+k],sum7);
+    //                 details::add_max(low,up,eight_lower[j*vectors_count_row+k],eight_upper[j*vectors_count_row+k],sum8);
+    //             }
+    //             sum[0]  = _mm512_reduce_add_pd(sum1);
+    //             sum[1]  = _mm512_reduce_add_pd(sum2);
+    //             sum[2]  = _mm512_reduce_add_pd(sum3);
+    //             sum[3]  = _mm512_reduce_add_pd(sum4);
+    //             sum[4]  = _mm512_reduce_add_pd(sum5);
+    //             sum[5]  = _mm512_reduce_add_pd(sum6);
+    //             sum[6]  = _mm512_reduce_add_pd(sum7);
+    //             sum[7]  = _mm512_reduce_add_pd(sum8);
+    //             result.upper[i * result.vectors_count_row + j] = _mm512_load_pd(&sum[0]);
+    //         }
+            
+    //     }
+
+
+    //     return result;
+    // }
+
     template <size_t P>
-    BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Grouped<M, P>& fst) {
-        BatchSwitchMatrixAVX512_Grouped<N, P> result(true);
-        auto pom = reorg(fst);
-        alignas(64) double sum[8];
-
-        __m512d * one_lower= fst.lower;
-        __m512d * two_lower= fst.lower + vectors_count/8;
-        __m512d * three_lower= fst.lower + vectors_count/4;
-        __m512d * four_lower= fst.lower + vectors_count*3/8;
-        __m512d * five_lower= fst.lower + vectors_count/2;
-        __m512d * six_lower= fst.lower + vectors_count*5/8;
-        __m512d * seven_lower= fst.lower + vectors_count*3/4;
-        __m512d * eight_lower= fst.lower + vectors_count*7/8;
-
-        __m512d * one_upper= fst.upper;
-        __m512d * two_upper= fst.upper + vectors_count/4;
-        __m512d * three_upper= fst.upper + vectors_count/2;
-        __m512d * four_upper= fst.upper + vectors_count*3/4;
-        __m512d * five_upper= fst.upper + vectors_count/2;
-        __m512d * six_upper= fst.upper + vectors_count*5/8;
-        __m512d * seven_upper= fst.upper + vectors_count*3/4;
-        __m512d * eight_upper= fst.upper + vectors_count*7/8;
-        // Round down pass
-        //(i,k), (j,k)
-        capd::rounding::DoubleRounding::roundDown();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                __m512d sum1 = _mm512_setzero_pd(), sum2 = _mm512_setzero_pd(),sum3 = _mm512_setzero_pd(),sum4 = _mm512_setzero_pd(),
-                        sum5 = _mm512_setzero_pd(), sum6 = _mm512_setzero_pd(),sum7 = _mm512_setzero_pd(),sum8 = _mm512_setzero_pd();
-                for (size_t k = 0; k < vectors_count_row; ++k) {
+BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Grouped<M, P>& fst) {
+    BatchSwitchMatrixAVX512_Grouped<N, P> result{};
+    static constexpr bool enable_parallel = (N >= 24) && (M >= 24) && (P >=24);
+    if constexpr(enable_parallel){
+        #pragma omp parallel
+        {
+            capd::rounding::DoubleRounding::roundDown();
+            #pragma omp for
+            for (size_t i = 0; i < N; ++i) {
+                alignas(64) __m512d lows[8];
+                alignas(64) __m512d upps[8];
+                for (size_t k = 0; k < full_vectors; ++k) {
                     __m512d low = lower[i*vectors_count_row+k];
                     __m512d up = upper[i*vectors_count_row+k];
-                    details::add_min(low,up,one_lower[j*vectors_count_row+k],one_upper[j*vectors_count_row+k],sum1);
-                    details::add_min(low,up,two_lower[j*vectors_count_row+k],two_upper[j*vectors_count_row+k],sum2);
-                    details::add_min(low,up,three_lower[j*vectors_count_row+k],three_upper[j*vectors_count_row+k],sum3);
-                    details::add_min(low,up,four_lower[j*vectors_count_row+k],four_upper[j*vectors_count_row+k],sum4);
-
-                    details::add_min(low,up,five_lower[j*vectors_count_row+k],five_upper[j*vectors_count_row+k],sum5);
-                    details::add_min(low,up,six_lower[j*vectors_count_row+k],six_upper[j*vectors_count_row+k],sum6);
-                    details::add_min(low,up,seven_lower[j*vectors_count_row+k],seven_upper[j*vectors_count_row+k],sum7);
-                    details::add_min(low,up,eight_lower[j*vectors_count_row+k],eight_upper[j*vectors_count_row+k],sum8);
+                    details::split_m512d_to_vectors(low,lows);
+                    details::split_m512d_to_vectors(up,upps);
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m512d& wyn = result.lower[i * result.vectors_count_row + j];
+                        details::add_min(lows[0],upps[0],fst.lower[k*8 * result.vectors_count_row + j],fst.upper[k*8 * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[1],upps[1],fst.lower[(k*8 +1)* result.vectors_count_row + j],fst.upper[(k*8 +1) * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[2],upps[2],fst.lower[(k*8 +2) * result.vectors_count_row + j],fst.upper[(k*8 +2) * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[3],upps[3],fst.lower[(k*8 +3) * result.vectors_count_row + j],fst.upper[(k*8 +3) * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[4],upps[4],fst.lower[(k*8 +4) * result.vectors_count_row + j],fst.upper[(k*8 +4) * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[5],upps[5],fst.lower[(k*8 +5) * result.vectors_count_row + j],fst.upper[(k*8 +5) * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[6],upps[6],fst.lower[(k*8 +6) * result.vectors_count_row + j],fst.upper[(k*8 +6) * result.vectors_count_row + j],wyn);
+                        details::add_min(lows[7],upps[7],fst.lower[(k*8 +7) * result.vectors_count_row + j],fst.upper[(k*8 +7) * result.vectors_count_row + j],wyn);
+                    }
                 }
-                sum[0]  = _mm512_reduce_add_pd(sum1);
-                sum[1]  = _mm512_reduce_add_pd(sum2);
-                sum[2]  = _mm512_reduce_add_pd(sum3);
-                sum[3]  = _mm512_reduce_add_pd(sum4);
-                sum[4]  = _mm512_reduce_add_pd(sum5);
-                sum[5]  = _mm512_reduce_add_pd(sum6);
-                sum[6]  = _mm512_reduce_add_pd(sum7);
-                sum[7]  = _mm512_reduce_add_pd(sum8);
-
-                result.lower[i * result.vectors_count_row + j] = _mm512_load_pd(&sum[0]);
+                if constexpr(rest >= 1){
+                    __m512d low = lower[i*vectors_count_row+full_vectors];
+                    __m512d up = upper[i*vectors_count_row+full_vectors];
+                    details::split_m512d_to_vectors(low,lows);
+                    details::split_m512d_to_vectors(up,upps);
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m512d& wyn = result.lower[i * result.vectors_count_row + j];
+                        if constexpr(rest >= 1)
+                            details::add_min(lows[0],upps[0],fst.lower[(full_vectors*8 +0)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +0)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 2)
+                            details::add_min(lows[1],upps[1],fst.lower[(full_vectors*8 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +1)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 3)
+                            details::add_min(lows[2],upps[2],fst.lower[(full_vectors*8 +2)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +2)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 4)
+                            details::add_min(lows[3],upps[3],fst.lower[(full_vectors*8 +3)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +3)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 5)
+                            details::add_min(lows[4],upps[4],fst.lower[(full_vectors*8 +4)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +4)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 6)
+                            details::add_min(lows[5],upps[5],fst.lower[(full_vectors*8 +5)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +5)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 7)
+                            details::add_min(lows[6],upps[6],fst.lower[(full_vectors*8 +6)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +6)* result.vectors_count_row + j],wyn);
+                    }
+                }
             }
-            
+
+            #pragma omp barrier
+
+            // Round up pass
+            capd::rounding::DoubleRounding::roundUp();
+            #pragma omp for
+            for (size_t i = 0; i < N; ++i) {
+                alignas(64) __m512d lows[8];
+                alignas(64) __m512d upps[8];
+                for (size_t k = 0; k < full_vectors; ++k) {
+                    __m512d low = lower[i*vectors_count_row+k];
+                    __m512d up = upper[i*vectors_count_row+k];
+                    details::split_m512d_to_vectors(low,lows);
+                    details::split_m512d_to_vectors(up,upps);
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m512d& wyn = result.upper[i * result.vectors_count_row + j];
+                        details::add_max(lows[0],upps[0],fst.lower[k*8 * result.vectors_count_row + j],fst.upper[k*8 * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[1],upps[1],fst.lower[(k*8 +1)* result.vectors_count_row + j],fst.upper[(k*8 +1) * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[2],upps[2],fst.lower[(k*8 +2) * result.vectors_count_row + j],fst.upper[(k*8 +2) * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[3],upps[3],fst.lower[(k*8 +3) * result.vectors_count_row + j],fst.upper[(k*8 +3) * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[4],upps[4],fst.lower[(k*8 +4) * result.vectors_count_row + j],fst.upper[(k*8 +4) * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[5],upps[5],fst.lower[(k*8 +5) * result.vectors_count_row + j],fst.upper[(k*8 +5) * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[6],upps[6],fst.lower[(k*8 +6) * result.vectors_count_row + j],fst.upper[(k*8 +6) * result.vectors_count_row + j],wyn);
+                        details::add_max(lows[7],upps[7],fst.lower[(k*8 +7) * result.vectors_count_row + j],fst.upper[(k*8 +7) * result.vectors_count_row + j],wyn);
+                    }
+                }
+                if constexpr(rest >= 1){
+                    __m512d low = lower[i*vectors_count_row+full_vectors];
+                    __m512d up = upper[i*vectors_count_row+full_vectors];
+                    details::split_m512d_to_vectors(low,lows);
+                    details::split_m512d_to_vectors(up,upps);
+                    for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                        __m512d& wyn = result.upper[i * result.vectors_count_row + j];
+                        if constexpr(rest >= 1)
+                            details::add_max(lows[0],upps[0],fst.lower[(full_vectors*8 +0)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +0)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 2)
+                            details::add_max(lows[1],upps[1],fst.lower[(full_vectors*8 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +1)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 3)
+                            details::add_max(lows[2],upps[2],fst.lower[(full_vectors*8 +2)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +2)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 4)
+                            details::add_max(lows[3],upps[3],fst.lower[(full_vectors*8 +3)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +3)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 5)
+                            details::add_max(lows[4],upps[4],fst.lower[(full_vectors*8 +4)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +4)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 6)
+                            details::add_max(lows[5],upps[5],fst.lower[(full_vectors*8 +5)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +5)* result.vectors_count_row + j],wyn);
+                        if constexpr(rest >= 7)
+                            details::add_max(lows[6],upps[6],fst.lower[(full_vectors*8 +6)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +6)* result.vectors_count_row + j],wyn);
+                    }
+                }
+            }
+        }
+    }
+    else{
+        alignas(64) __m512d lows[8];
+        alignas(64) __m512d upps[8];
+        capd::rounding::DoubleRounding::roundDown();
+        for (size_t i = 0; i < N; ++i) {
+            for (size_t k = 0; k < full_vectors; ++k) {
+                __m512d low = lower[i*vectors_count_row+k];
+                __m512d up = upper[i*vectors_count_row+k];
+                details::split_m512d_to_vectors(low,lows);
+                details::split_m512d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m512d& wyn = result.lower[i * result.vectors_count_row + j];
+                    details::add_min(lows[0],upps[0],fst.lower[k*8 * result.vectors_count_row + j],fst.upper[k*8 * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[1],upps[1],fst.lower[(k*8 +1)* result.vectors_count_row + j],fst.upper[(k*8 +1) * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[2],upps[2],fst.lower[(k*8 +2) * result.vectors_count_row + j],fst.upper[(k*8 +2) * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[3],upps[3],fst.lower[(k*8 +3) * result.vectors_count_row + j],fst.upper[(k*8 +3) * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[4],upps[4],fst.lower[(k*8 +4) * result.vectors_count_row + j],fst.upper[(k*8 +4) * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[5],upps[5],fst.lower[(k*8 +5) * result.vectors_count_row + j],fst.upper[(k*8 +5) * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[6],upps[6],fst.lower[(k*8 +6) * result.vectors_count_row + j],fst.upper[(k*8 +6) * result.vectors_count_row + j],wyn);
+                    details::add_min(lows[7],upps[7],fst.lower[(k*8 +7) * result.vectors_count_row + j],fst.upper[(k*8 +7) * result.vectors_count_row + j],wyn);
+                }
+            }
+            if constexpr(rest >= 1){
+                __m512d low = lower[i*vectors_count_row+full_vectors];
+                __m512d up = upper[i*vectors_count_row+full_vectors];
+                details::split_m512d_to_vectors(low,lows);
+                details::split_m512d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m512d& wyn = result.lower[i * result.vectors_count_row + j];
+                    if constexpr(rest >= 1)
+                        details::add_min(lows[0],upps[0],fst.lower[(full_vectors*8 +0)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +0)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 2)
+                        details::add_min(lows[1],upps[1],fst.lower[(full_vectors*8 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +1)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 3)
+                        details::add_min(lows[2],upps[2],fst.lower[(full_vectors*8 +2)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +2)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 4)
+                        details::add_min(lows[3],upps[3],fst.lower[(full_vectors*8 +3)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +3)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 5)
+                        details::add_min(lows[4],upps[4],fst.lower[(full_vectors*8 +4)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +4)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 6)
+                        details::add_min(lows[5],upps[5],fst.lower[(full_vectors*8 +5)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +5)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 7)
+                        details::add_min(lows[6],upps[6],fst.lower[(full_vectors*8 +6)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +6)* result.vectors_count_row + j],wyn);
+                }
+            }
         }
 
         // Round up pass
         capd::rounding::DoubleRounding::roundUp();
         for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                __m512d sum1 = _mm512_setzero_pd(), sum2 = _mm512_setzero_pd(),sum3 = _mm512_setzero_pd(),sum4 = _mm512_setzero_pd(),
-                        sum5 = _mm512_setzero_pd(), sum6 = _mm512_setzero_pd(),sum7 = _mm512_setzero_pd(),sum8 = _mm512_setzero_pd();
-                for (size_t k = 0; k < vectors_count_row; ++k) {
-                    __m512d low = lower[i*vectors_count_row+k];
-                    __m512d up = upper[i*vectors_count_row+k];
-                    details::add_max(low,up,one_lower[j*vectors_count_row+k],one_upper[j*vectors_count_row+k],sum1);
-                    details::add_max(low,up,two_lower[j*vectors_count_row+k],two_upper[j*vectors_count_row+k],sum2);
-                    details::add_max(low,up,three_lower[j*vectors_count_row+k],three_upper[j*vectors_count_row+k],sum3);
-                    details::add_max(low,up,four_lower[j*vectors_count_row+k],four_upper[j*vectors_count_row+k],sum4);
-
-                    details::add_max(low,up,five_lower[j*vectors_count_row+k],five_upper[j*vectors_count_row+k],sum5);
-                    details::add_max(low,up,six_lower[j*vectors_count_row+k],six_upper[j*vectors_count_row+k],sum6);
-                    details::add_max(low,up,seven_lower[j*vectors_count_row+k],seven_upper[j*vectors_count_row+k],sum7);
-                    details::add_max(low,up,eight_lower[j*vectors_count_row+k],eight_upper[j*vectors_count_row+k],sum8);
+            for (size_t k = 0; k < full_vectors; ++k) {
+                __m512d low = lower[i*vectors_count_row+k];
+                __m512d up = upper[i*vectors_count_row+k];
+                details::split_m512d_to_vectors(low,lows);
+                details::split_m512d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m512d& wyn = result.upper[i * result.vectors_count_row + j];
+                    details::add_max(lows[0],upps[0],fst.lower[k*8 * result.vectors_count_row + j],fst.upper[k*8 * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[1],upps[1],fst.lower[(k*8 +1)* result.vectors_count_row + j],fst.upper[(k*8 +1) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[2],upps[2],fst.lower[(k*8 +2) * result.vectors_count_row + j],fst.upper[(k*8 +2) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[3],upps[3],fst.lower[(k*8 +3) * result.vectors_count_row + j],fst.upper[(k*8 +3) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[4],upps[4],fst.lower[(k*8 +4) * result.vectors_count_row + j],fst.upper[(k*8 +4) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[5],upps[5],fst.lower[(k*8 +5) * result.vectors_count_row + j],fst.upper[(k*8 +5) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[6],upps[6],fst.lower[(k*8 +6) * result.vectors_count_row + j],fst.upper[(k*8 +6) * result.vectors_count_row + j],wyn);
+                    details::add_max(lows[7],upps[7],fst.lower[(k*8 +7) * result.vectors_count_row + j],fst.upper[(k*8 +7) * result.vectors_count_row + j],wyn);
                 }
-                sum[0]  = _mm512_reduce_add_pd(sum1);
-                sum[1]  = _mm512_reduce_add_pd(sum2);
-                sum[2]  = _mm512_reduce_add_pd(sum3);
-                sum[3]  = _mm512_reduce_add_pd(sum4);
-                sum[4]  = _mm512_reduce_add_pd(sum5);
-                sum[5]  = _mm512_reduce_add_pd(sum6);
-                sum[6]  = _mm512_reduce_add_pd(sum7);
-                sum[7]  = _mm512_reduce_add_pd(sum8);
-                result.upper[i * result.vectors_count_row + j] = _mm512_load_pd(&sum[0]);
             }
-            
+            if constexpr(rest >= 1){
+                __m512d low = lower[i*vectors_count_row+full_vectors];
+                __m512d up = upper[i*vectors_count_row+full_vectors];
+                details::split_m512d_to_vectors(low,lows);
+                details::split_m512d_to_vectors(up,upps);
+                for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                    __m512d& wyn = result.upper[i * result.vectors_count_row + j];
+                    if constexpr(rest >= 1)
+                        details::add_max(lows[0],upps[0],fst.lower[(full_vectors*8 +0)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +0)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 2)
+                        details::add_max(lows[1],upps[1],fst.lower[(full_vectors*8 +1)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +1)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 3)
+                        details::add_max(lows[2],upps[2],fst.lower[(full_vectors*8 +2)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +2)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 4)
+                        details::add_max(lows[3],upps[3],fst.lower[(full_vectors*8 +3)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +3)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 5)
+                        details::add_max(lows[4],upps[4],fst.lower[(full_vectors*8 +4)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +4)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 6)
+                        details::add_max(lows[5],upps[5],fst.lower[(full_vectors*8 +5)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +5)* result.vectors_count_row + j],wyn);
+                    if constexpr(rest >= 7)
+                        details::add_max(lows[6],upps[6],fst.lower[(full_vectors*8 +6)* result.vectors_count_row + j],fst.upper[(full_vectors*8 +6)* result.vectors_count_row + j],wyn);
+                }
+            }
         }
-
-
-        return result;
     }
+    return result;
+}
 
     BatchSwitchMatrixAVX512_Grouped & operator+=(const BatchSwitchMatrixAVX512_Grouped& fst){
         *this = *this+fst;
@@ -679,10 +891,28 @@ public:
     return os;
     }
 
-    IntervalProxy<Accessor,size_t> operator()(size_t j, size_t k){
+    IntervalProxy<Accessor,Index> operator()(size_t j, size_t k){
         Index ind(j*vectors_count_row+k/8,k%8);
         Accessor acc = {lower,upper};
-        return IntervalProxy<Accessor,size_t>(acc,ind);
+        return IntervalProxy<Accessor,Index>(acc,ind);
+    }
+    IntervalProxy<Accessor,Index> operator()(size_t j, size_t k) const{
+        Index ind(j*vectors_count_row+k/8,k%8);
+        Accessor acc = {lower,upper};
+        return IntervalProxy<Accessor,Index>(acc,ind);
+    }
+
+    bool operator==(const MatrixBasic<Interval,N,M> & fst){
+        for(size_t i = 0; i <N; i++){
+            for(size_t j = 0; j < M; j++){
+                Interval interval = (*this)(i,j);
+                if(interval != fst(i,j)) {
+                    std::cout << i << " " << j << std::endl;
+                    return false;
+                }
+            }
+        }
+        return true;
     }
    
     ~BatchSwitchMatrixAVX512_Grouped(){

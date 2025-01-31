@@ -15,7 +15,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mavx2 -mfma -mavx512f -frounding-math")
 # Włączenie OpenMP
 
-
+find_package(OpenMP)
 # Ścieżki do nagłówków i plików źródłowych
 include_directories(include)
 file(GLOB SOURCES src/main.cpp src/Interval.cpp)
@@ -31,11 +31,11 @@ find_package(benchmark REQUIRED) # Wymaga, aby benchmark był zainstalowany i do
 add_executable(main ${SOURCES})
 
 # Linkowanie z biblioteką CAPD
-target_link_libraries(main capd)
+target_link_libraries(main capd OpenMP::OpenMP_CXX)
 
 # Dodanie benchmarków jako osobnego pliku wykonywalnego
 add_executable(benchmark_tests_matrix benchmark/matrix_speed.cpp src/Interval.cpp)
 add_executable(benchmark_tests_vector benchmark/vector_speed.cpp src/Interval.cpp)
 # Linkowanie z biblioteką Google Benchmark i CAPD
-target_link_libraries(benchmark_tests_matrix benchmark::benchmark capd)
+target_link_libraries(benchmark_tests_matrix benchmark::benchmark capd OpenMP::OpenMP_CXX)
 target_link_libraries(benchmark_tests_vector benchmark::benchmark capd)
