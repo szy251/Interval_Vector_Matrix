@@ -2,7 +2,8 @@
 #define VECTOR_BATCH_AVX_HPP
 
 #include <iostream>
-#include<capd/intervals/Interval.hpp>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <immintrin.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
@@ -12,7 +13,7 @@ class BatchSwitchVectorAVX_G256
 {
 private:
     __m256d* data = nullptr;
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     static constexpr size_t vectors_count = (N+3)/4;
     static constexpr size_t full_vectors = N/4;
     static constexpr size_t rest = N % 4;
@@ -387,7 +388,6 @@ public:
         case 4:{
             __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
             __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
-            __m256d zero = _mm256_setzero_pd();
 
             BatchSwitchVectorAVX_G256 result(true);
             capd::rounding::DoubleRounding::roundDown();
@@ -403,7 +403,6 @@ public:
         case 6:{
             __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
             __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
-            __m256d zero = _mm256_setzero_pd();
 
             BatchSwitchVectorAVX_G256 result(true);
             capd::rounding::DoubleRounding::roundDown();

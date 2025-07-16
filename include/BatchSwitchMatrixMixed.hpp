@@ -2,14 +2,15 @@
 #define MATRIX_BATCH_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.h>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
 
 template<size_t N, size_t M>
 class BatchSwitchMatrixMixed{
     private:
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     double *data =  nullptr;
     template<size_t N1,size_t M1>
     friend class BatchSwitchMatrixMixed;
@@ -26,6 +27,8 @@ class BatchSwitchMatrixMixed{
     };
 
     public:
+    static constexpr size_t rows = N;
+    static constexpr size_t cols = M;
     BatchSwitchMatrixMixed(bool allocateOnly)
     {
         if(allocateOnly)    data = new double[2*N*M];
@@ -54,7 +57,9 @@ class BatchSwitchMatrixMixed{
         }
 
         data = new double[2 * N*M]; 
-        std::copy(vec.begin(), vec.end(), data);
+        for(size_t i = 0; i < 2*N*M; i++){
+            data[i] = vec[i];
+        }
     }
 
     BatchSwitchMatrixMixed& operator=(const BatchSwitchMatrixMixed& fst) {
@@ -104,123 +109,130 @@ class BatchSwitchMatrixMixed{
         }
         return result;
     }
-    /*
-    template <size_t P>
-    BatchSwitchMatrixMixed<N, P> operator*(const BatchSwitchMatrixMixed<M, P>& fst) {
-        BatchSwitchMatrixMixed<N,P> result(true);
-        BatchSwitchMatrixMixed<P,M> pom = transposition(fst);
-
-        capd::rounding::DoubleRounding::roundDown();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < P; ++j) {
-            double sum = 0;
-                for (size_t k = 0; k < M; ++k) {
-                    // Obliczenie wspólnych indeksów
-                    size_t idx1 = (i * M + k) * 2;
-                    size_t idx2 = (j * M + k) * 2;
-
-                    // Pobranie wartości z macierzy
-                    double a_min = data[idx1];
-                    double a_max = data[idx1 + 1];
-                    double b_min = fst.data[idx2];
-                    double b_max = fst.data[idx2 + 1];
-
-                    // Pomijanie zerowych przedziałów
-                    if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
-                        continue;
-                    }
-
-                    // Różne przypadki obliczeniowe
-                    if (a_min >= 0) {
-                        // Przedział dodatni (++) 
-                        if (b_min >= 0) {
-                            sum += a_min * b_min; // (++) * (++)
-                        } else {
-                            sum += a_max * b_min; // (++) * (-+), (++) * (--)
-                        }
-                    } else if (a_max <= 0) {
-                        // Przedział ujemny (--)
-                        if (b_max <= 0) {
-                            sum += a_max * b_max; // (--) * (--)
-                        } else {
-                            sum += a_min * b_max; // (--) * (-+), (--) * (++)
-                        }
-                    } else {
-                        // Przedział mieszany (-+)
-                        if (b_max <= 0) {
-                            sum += a_max * b_min; // (-+) * (--)
-                        } else if (b_min >= 0) {
-                            sum += a_min * b_max; // (-+) * (++)
-                        } else {
-                            // (-+) * (-+), wybór mniejszej wartości
-                            double t = a_min * b_max;
-                            double z = a_max * b_min;
-                            sum += (z < t) ? z : t;
-                        }
-                    }
-                }
-                result.data[(i*P+j)*2] = sum;
-            }
-        }
 
 
-         capd::rounding::DoubleRounding::roundUp();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < P; ++j) {
-            double sum = 0;
-                for (size_t k = 0; k < M; ++k) {
-                    // Obliczenie wspólnych indeksów
-                    size_t idx1 = (i * M + k) * 2;
-                    size_t idx2 = (j * M + k) * 2;
 
-                    // Pobranie wartości z macierzy
-                    double a_min = data[idx1];
-                    double a_max = data[idx1 + 1];
-                    double b_min = fst.data[idx2];
-                    double b_max = fst.data[idx2 + 1];
+    //mnożenie z reorganizacją
 
-                    // Pomijanie zerowych przedziałów
-                    if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
-                        continue;
-                    }
+    // template <size_t P>
+    // BatchSwitchMatrixMixed<N, P> operator*(const BatchSwitchMatrixMixed<M, P>& fst) {
+    //     BatchSwitchMatrixMixed<N,P> result(true);
+    //     BatchSwitchMatrixMixed<P,M> pom = transposition(fst);
 
-                    // Różne przypadki obliczeniowe
-                    if (a_min >= 0) {
-                        // Przedział dodatni (++) 
-                        if (b_max <= 0) {
-                            sum += a_min * b_max; // (++) * (--)
-                        } else {
-                            sum += a_max * b_max; // (++) * (-+), (++) * (++)
-                        }
-                    } else if (a_max <= 0) {
-                        // Przedział ujemny (--)
-                        if (b_min >= 0) {
-                            sum += a_max * b_min; // (--) * (++)
-                        } else {
-                            sum += a_min * b_min; // (--) * (-+), (--) * (--)
-                        }
-                    } else {
-                        // Przedział mieszany (-+)
-                        if (b_max <= 0) {
-                            sum += a_min * b_min; // (-+) * (--)
-                        } else if (b_min >= 0) {
-                            sum += a_max * b_max; // (-+) * (++)
-                        } else {
-                            // (-+) * (-+), wybór mniejszej wartości
-                            double t = a_min * b_min;
-                            double z = a_max * b_max;
-                            sum += (z < t) ? z : t;
-                        }
-                    }
-                }
-                result.data[(i*P+j)*2+1] = sum;
-            }
-        }
+    //     capd::rounding::DoubleRounding::roundDown();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t j = 0; j < P; ++j) {
+    //         double sum = 0;
+    //             for (size_t k = 0; k < M; ++k) {
+    //                 // Obliczenie wspólnych indeksów
+    //                 size_t idx1 = (i * M + k) * 2;
+    //                 size_t idx2 = (j * M + k) * 2;
 
-        return result;
-    } 
+    //                 // Pobranie wartości z macierzy
+    //                 double a_min = data[idx1];
+    //                 double a_max = data[idx1 + 1];
+    //                 double b_min = fst.data[idx2];
+    //                 double b_max = fst.data[idx2 + 1];
 
-    */
+    //                 // Pomijanie zerowych przedziałów
+    //                 if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
+    //                     continue;
+    //                 }
+
+    //                 // Różne przypadki obliczeniowe
+    //                 if (a_min >= 0) {
+    //                     // Przedział dodatni (++) 
+    //                     if (b_min >= 0) {
+    //                         sum += a_min * b_min; // (++) * (++)
+    //                     } else {
+    //                         sum += a_max * b_min; // (++) * (-+), (++) * (--)
+    //                     }
+    //                 } else if (a_max <= 0) {
+    //                     // Przedział ujemny (--)
+    //                     if (b_max <= 0) {
+    //                         sum += a_max * b_max; // (--) * (--)
+    //                     } else {
+    //                         sum += a_min * b_max; // (--) * (-+), (--) * (++)
+    //                     }
+    //                 } else {
+    //                     // Przedział mieszany (-+)
+    //                     if (b_max <= 0) {
+    //                         sum += a_max * b_min; // (-+) * (--)
+    //                     } else if (b_min >= 0) {
+    //                         sum += a_min * b_max; // (-+) * (++)
+    //                     } else {
+    //                         // (-+) * (-+), wybór mniejszej wartości
+    //                         double t = a_min * b_max;
+    //                         double z = a_max * b_min;
+    //                         sum += (z < t) ? z : t;
+    //                     }
+    //                 }
+    //             }
+    //             result.data[(i*P+j)*2] = sum;
+    //         }
+    //     }
+
+
+    //      capd::rounding::DoubleRounding::roundUp();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t j = 0; j < P; ++j) {
+    //         double sum = 0;
+    //             for (size_t k = 0; k < M; ++k) {
+    //                 // Obliczenie wspólnych indeksów
+    //                 size_t idx1 = (i * M + k) * 2;
+    //                 size_t idx2 = (j * M + k) * 2;
+
+    //                 // Pobranie wartości z macierzy
+    //                 double a_min = data[idx1];
+    //                 double a_max = data[idx1 + 1];
+    //                 double b_min = fst.data[idx2];
+    //                 double b_max = fst.data[idx2 + 1];
+
+    //                 // Pomijanie zerowych przedziałów
+    //                 if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
+    //                     continue;
+    //                 }
+
+    //                 // Różne przypadki obliczeniowe
+    //                 if (a_min >= 0) {
+    //                     // Przedział dodatni (++) 
+    //                     if (b_max <= 0) {
+    //                         sum += a_min * b_max; // (++) * (--)
+    //                     } else {
+    //                         sum += a_max * b_max; // (++) * (-+), (++) * (++)
+    //                     }
+    //                 } else if (a_max <= 0) {
+    //                     // Przedział ujemny (--)
+    //                     if (b_min >= 0) {
+    //                         sum += a_max * b_min; // (--) * (++)
+    //                     } else {
+    //                         sum += a_min * b_min; // (--) * (-+), (--) * (--)
+    //                     }
+    //                 } else {
+    //                     // Przedział mieszany (-+)
+    //                     if (b_max <= 0) {
+    //                         sum += a_min * b_min; // (-+) * (--)
+    //                     } else if (b_min >= 0) {
+    //                         sum += a_max * b_max; // (-+) * (++)
+    //                     } else {
+    //                         // (-+) * (-+), wybór mniejszej wartości
+    //                         double t = a_min * b_min;
+    //                         double z = a_max * b_max;
+    //                         sum += (z < t) ? z : t;
+    //                     }
+    //                 }
+    //             }
+    //             result.data[(i*P+j)*2+1] = sum;
+    //         }
+    //     }
+
+    //     return result;
+    // } 
+
+
+
+
+//monżenie z reorganizacją i preklasyfikacją
 
 
 //    template <size_t P>
@@ -336,163 +348,306 @@ class BatchSwitchMatrixMixed{
 //     return result;
 // }
 
-   template <size_t P>
+
+//standard 
+
+template <size_t P>
     BatchSwitchMatrixMixed<N, P> operator*(const BatchSwitchMatrixMixed<M, P>& fst) {
     BatchSwitchMatrixMixed<N, P> result{};
     double tmp;
-    char* a_type = new char[N * M];
-    for (size_t i = 0; i < N * M; i++) {
-        a_type[i] = type_mtrx(data[2 * i], data[2 * i + 1]);
-    }
 
-    char* b_type = new char[P * M];
-    for (size_t i = 0; i < P * M; i++) {
-        b_type[i] = type_mtrx(fst.data[2 * i], fst.data[2 * i + 1]);
-    }
-
-    // Round down pass
         capd::rounding::DoubleRounding::roundDown();
         for (size_t i = 0; i < N; ++i) {
             for (size_t k = 0; k < M; ++k) {
                 size_t idx1 = i * M + k;
-                double low =  data[idx1*2];
-                double upp = data[idx1*2+1];
-                char type1 = a_type[idx1];
-                    switch (type1) {
-                        case 1:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
+                double m_right =  data[idx1*2+1];
+                double m_left = data[idx1*2];
 
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                                if (type2 == 1) tmp = low * fst.data[idx2*2];
-                                else tmp =  upp * fst.data[idx2*2];
-                                result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+                    if(m_right == 0 && m_left == 0){}
+                    else if(m_right <= 0)     // (--)
+                    {
+                        for (size_t j = 0; j < P; ++j){
+                            size_t idx2 = k * P +j;
+                            if(fst.data[idx2*2+1] <= 0)   // (--)(--)
+                            {
+                                tmp= m_right * fst.data[idx2*2+1];
                             }
-                            break;
-                        }
-                        case 2:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                            if (type2 == 1) tmp = upp* fst.data[idx2*2];
-                            else tmp = low * fst.data[idx2*2];
+                            else                      // (--)(-+) (--)(++)
+                            {
+                                tmp = m_left * fst.data[idx2*2+1];
+                            }
                             result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
-                            }
-                            break;
-                        }
-                        case 3:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
 
-                                char type2 = b_type[idx2];
-
-                               switch (type2) {
-                                case 1:
-                                    tmp =  low * fst.data[idx2*2+1];
-                                    break;
-                                case 2:
-                                    tmp =  upp * fst.data[idx2*2];
-                                    break;
-                                case 3:{
-                                    double t = low * fst.data[idx2*2+1];
-                                    double z = upp * fst.data[idx2*2];
-                                    tmp =  std::min(t, z);
-                                    break;
-                                }
-                                default:
-                                    continue;
-                                }
-                                result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
-                            }
-                            break;
                         }
-                    }   
+                    }
+                    else                // (m_right > 0)
+                    if(m_left >= 0)   //  (++)
+                    {
+                        for (size_t j = 0; j < P; ++j){
+                            size_t idx2 = k * P +j;
+                            if(fst.data[idx2*2] >= 0)   // (++)(++)
+                            {
+                                tmp = m_left * fst.data[idx2*2];
+                            }
+                            else                       // (++)(-+) (++)(--)
+                            {
+                                tmp = m_right * fst.data[idx2*2];
+                            }
+                            result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+                        }
+                    }
+                    else //  m_left<=0 && m_right>=0 (-+)
+                    {
+                        for (size_t j = 0; j < P; ++j){
+                            size_t idx2 = k * P +j;
+                            if(fst.data[idx2*2+1] <= 0)    // (-+)(--)
+                            {
+                                tmp = m_right * fst.data[idx2*2];
+                            }
+                            else
+                            if(fst.data[idx2*2] >= 0 )    // (-+)(++)
+                            {
+                            tmp = m_left * fst.data[idx2*2+1];
+                            }
+                            else                        // (-+)(-+)
+                            {
+                                double t1 = m_left * fst.data[idx2*2+1];
+                                double t2 = m_right * fst.data[idx2*2];
+                                tmp = (t1 > t2)? t2 : t1;
+                            }
+                            result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+                        }
+                    }
+
             }
         }
 
-        // Round up pass
+    
         capd::rounding::DoubleRounding::roundUp();
         for (size_t i = 0; i < N; ++i) {
             for (size_t k = 0; k < M; ++k) {
                 size_t idx1 = i * M + k;
-                double low =  data[idx1*2];
-                double upp = data[idx1*2+1];
-                char type1 = a_type[idx1];
-                    switch (type1) {
-                        case 1:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                                if (type2 == 2) tmp = low * fst.data[idx2*2+1];
-                                else tmp = upp * fst.data[idx2*2+1];
-                                result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
-                            }
-                            break;
+                double m_right =  data[idx1*2+1];
+                double m_left = data[idx1*2];
+                if(m_right == 0 && m_left == 0){}
+                else if (m_right <= 0)     // (--)
+                {
+                    for (size_t j = 0; j < P; ++j){
+                        size_t idx2 = k * P +j;
+                        if(fst.data[idx2*2] >= 0)  // (--)(++)
+                        {
+                            tmp = m_right * fst.data[idx2*2];
                         }
-                        case 2:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                            if (type2 == 1) tmp = upp* fst.data[idx2*2];
-                            else tmp = low * fst.data[idx2*2];
-                            result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
-                            }
-                            break;
+                        else                      // (--)(-+) (--)(--)
+                        {
+                            tmp = m_left * fst.data[idx2*2];
                         }
-                        case 3:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                               switch (type2) {
-                                case 1:
-                                    tmp = upp * fst.data[idx2*2+1];
-                                    break;
-                                case 2:
-                                    tmp = low * fst.data[idx2*2];
-                                    break;
-                                case 3:{
-                                    double t = low * fst.data[idx2*2];
-                                    double z = upp * fst.data[idx2*2+1];
-                                    tmp = std::max(t, z);
-                                    break;
-                                }
-                                default:
-                                    continue;
-                            }
-                                result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
-                            }
-                            break;
+                        result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1] + tmp;
+                    }
+                }
+                else                // (m_right > 0)
+                if(m_left >= 0)   //  (++)
+                {
+                    for (size_t j = 0; j < P; ++j){
+                        size_t idx2 = k * P +j;
+                        if(fst.data[idx2*2+1] <= 0)   // (++)(--)
+                        {
+                            tmp = m_left * fst.data[idx2*2+1];
                         }
-                    }   
+                        else                       // (++)(-+) (++)(++)
+                        {
+                            tmp = m_right * fst.data[idx2*2+1];
+                        }
+                        result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1] + tmp;
+                    }
+                }
+                else //  m_left<=0 && m_right>=0 (-+)
+                {
+                    for (size_t j = 0; j < P; ++j){
+                        size_t idx2 = k * P +j;
+                        if(fst.data[idx2*2+1] <= 0)    // (-+)(--)
+                        {
+                            tmp = m_left * fst.data[idx2*2];
+                        }
+                        else
+                        if(fst.data[idx2*2] >= 0 )    // (-+)(++)
+                        {
+                            tmp = m_right * fst.data[idx2*2+1];
+                        }
+                        else                        // (-+)(-+)
+                        {
+                            double t1 = m_left * fst.data[idx2*2];
+                            double t2 = m_right * fst.data[idx2*2+1];
+                            tmp = (t1 < t2)? t2 : t1;
+                        }
+                        result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1] + tmp;
+                    }
+                }
+                   
             }
         }
-
-    delete[] a_type;
-    delete[] b_type;
-
     return result;
 }
+
+//mnożenie z preklasyfikacją
+
+//    template <size_t P>
+//     BatchSwitchMatrixMixed<N, P> operator*(const BatchSwitchMatrixMixed<M, P>& fst) {
+//     BatchSwitchMatrixMixed<N, P> result{};
+//     double tmp;
+//     char* a_type = new char[N * M];
+//     for (size_t i = 0; i < N * M; i++) {
+//         a_type[i] = type_mtrx(data[2 * i], data[2 * i + 1]);
+//     }
+
+//     char* b_type = new char[P * M];
+//     for (size_t i = 0; i < P * M; i++) {
+//         b_type[i] = type_mtrx(fst.data[2 * i], fst.data[2 * i + 1]);
+//     }
+
+//     // Round down pass
+//         capd::rounding::DoubleRounding::roundDown();
+//         for (size_t i = 0; i < N; ++i) {
+//             for (size_t k = 0; k < M; ++k) {
+//                 size_t idx1 = i * M + k;
+//                 double low =  data[idx1*2];
+//                 double upp = data[idx1*2+1];
+//                 char type1 = a_type[idx1];
+//                     switch (type1) {
+//                         case 1:{
+//                             for (size_t j = 0; j < P; ++j) {
+//                                 size_t idx2 = k * P +j;
+
+//                                 char type2 = b_type[idx2];
+
+//                                 if (type2 == 0) {
+//                                     continue;
+//                                 }
+//                                 if (type2 == 1) tmp = low * fst.data[idx2*2];
+//                                 else tmp =  upp * fst.data[idx2*2];
+//                                 result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+//                             }
+//                             break;
+//                         }
+//                         case 2:{
+//                             for (size_t j = 0; j < P; ++j) {
+//                                 size_t idx2 = k * P +j;
+
+//                                 char type2 = b_type[idx2];
+
+//                                 if (type2 == 0) {
+//                                     continue;
+//                                 }
+//                             if (type2 == 1) tmp = upp* fst.data[idx2*2];
+//                             else tmp = low * fst.data[idx2*2];
+//                             result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+//                             }
+//                             break;
+//                         }
+//                         case 3:{
+//                             for (size_t j = 0; j < P; ++j) {
+//                                 size_t idx2 = k * P +j;
+
+//                                 char type2 = b_type[idx2];
+
+//                                switch (type2) {
+//                                 case 1:
+//                                     tmp =  low * fst.data[idx2*2+1];
+//                                     break;
+//                                 case 2:
+//                                     tmp =  upp * fst.data[idx2*2];
+//                                     break;
+//                                 case 3:{
+//                                     double t = low * fst.data[idx2*2+1];
+//                                     double z = upp * fst.data[idx2*2];
+//                                     tmp =  std::min(t, z);
+//                                     break;
+//                                 }
+//                                 default:
+//                                     continue;
+//                                 }
+//                                 result.data[(i * P + j)*2] = result.data[(i * P + j)*2] + tmp;
+//                             }
+//                             break;
+//                         }
+//                     }   
+//             }
+//         }
+
+//         // Round up pass
+//         capd::rounding::DoubleRounding::roundUp();
+//         for (size_t i = 0; i < N; ++i) {
+//             for (size_t k = 0; k < M; ++k) {
+//                 size_t idx1 = i * M + k;
+//                 double low =  data[idx1*2];
+//                 double upp = data[idx1*2+1];
+//                 char type1 = a_type[idx1];
+//                     switch (type1) {
+//                         case 1:{
+//                             for (size_t j = 0; j < P; ++j) {
+//                                 size_t idx2 = k * P +j;
+
+//                                 char type2 = b_type[idx2];
+
+//                                 if (type2 == 0) {
+//                                     continue;
+//                                 }
+//                                 if (type2 == 2) tmp = low * fst.data[idx2*2+1];
+//                                 else tmp = upp * fst.data[idx2*2+1];
+//                                 result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
+//                             }
+//                             break;
+//                         }
+//                         case 2:{
+//                             for (size_t j = 0; j < P; ++j) {
+//                                 size_t idx2 = k * P +j;
+
+//                                 char type2 = b_type[idx2];
+
+//                                 if (type2 == 0) {
+//                                     continue;
+//                                 }
+//                             if (type2 == 1) tmp = upp* fst.data[idx2*2];
+//                             else tmp = low * fst.data[idx2*2];
+//                             result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
+//                             }
+//                             break;
+//                         }
+//                         case 3:{
+//                             for (size_t j = 0; j < P; ++j) {
+//                                 size_t idx2 = k * P +j;
+
+//                                 char type2 = b_type[idx2];
+
+//                                switch (type2) {
+//                                 case 1:
+//                                     tmp = upp * fst.data[idx2*2+1];
+//                                     break;
+//                                 case 2:
+//                                     tmp = low * fst.data[idx2*2];
+//                                     break;
+//                                 case 3:{
+//                                     double t = low * fst.data[idx2*2];
+//                                     double z = upp * fst.data[idx2*2+1];
+//                                     tmp = std::max(t, z);
+//                                     break;
+//                                 }
+//                                 default:
+//                                     continue;
+//                             }
+//                                 result.data[(i * P + j)*2+1] = result.data[(i * P + j)*2+1]+tmp;
+//                             }
+//                             break;
+//                         }
+//                     }   
+//             }
+//         }
+
+//     delete[] a_type;
+//     delete[] b_type;
+
+//     return result;
+// }
 
     BatchSwitchMatrixMixed & operator+=(const BatchSwitchMatrixMixed& fst){
         *this = *this+fst;
@@ -638,7 +793,7 @@ class BatchSwitchMatrixMixed{
                     {
                         double k = fst.data[i-1]*scd.leftBound();
                         if(fst.data[i] > 0. ){
-                            result.data[i] = std::min(k,fst.data[i]*scd.rightBound());
+                            result.data[i] = std::max(k,fst.data[i]*scd.rightBound());
                         }
                         else result.data[i] = k;
                     }

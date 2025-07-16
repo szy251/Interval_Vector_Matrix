@@ -2,7 +2,8 @@
 #define VECTOR_BATCH_GRP_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.h>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
 
@@ -10,7 +11,7 @@ template<size_t N>
 class BatchSwitchVector_Grouped
 {
 private:
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     double* low = nullptr; // Dolne wartości
     double* up = nullptr;  // Górne wartości
     
@@ -267,7 +268,7 @@ public:
                     {
                         double k = fst.low[i]*scd.leftBound();
                         if(fst.up[i] > 0. ){
-                            result.up[i] = std::min(k,fst.up[i]*scd.rightBound());
+                            result.up[i] = std::max(k,fst.up[i]*scd.rightBound());
                         }
                         else result.up[i] = k;
                     }

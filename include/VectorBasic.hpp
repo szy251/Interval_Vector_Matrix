@@ -4,25 +4,36 @@
 #include <iostream>
 #include <stdexcept>
 #include <initializer_list>
+#include <Interval.hpp>
 #include <EqualityComparable.hpp>
 
 template <typename T, size_t N>
 class VectorBasic
 {
-public:
+private:
+    void allocateImpl(std::true_type) {
+        data = static_cast<T*>(operator new[](N * sizeof(T)));
+    }
+
+    void allocateImpl(std::false_type) {
+        data = new T[N];
+    }
     VectorBasic(bool allocateOnly) {
         if (allocateOnly) {
-            data = static_cast<T*>(operator new[](N * sizeof(T))); // alokacja pamięci
+            allocateImpl(std::is_same<T, opt::Interval>{});
         } else {
             data = nullptr;
         }
     }
+public:
+    
+
     VectorBasic() {
         data = new T[N]();
     }
 
     VectorBasic(const T& value) {
-        data = new T[N];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         for (size_t i = 0; i < N; ++i) {
             data[i] = value;
         }
@@ -32,14 +43,23 @@ public:
         if (values.size() != N) {
             throw std::invalid_argument("Initializer list size must match vector size.");
         }
-        data = new T[N];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         std::copy(values.begin(), values.end(), data);
     }
 
     VectorBasic(const VectorBasic& other) {
-        data = new T[N];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         for (size_t i = 0; i < N; ++i) {
             data[i] = other.data[i];
+        }
+    }
+    VectorBasic(const std::vector<double>& array) {
+        if (array.size() != 2 * N) {
+            throw std::invalid_argument("Rozmiar wektora musi wynosić dokładnie 2 * N.");
+        }
+        allocateImpl(std::is_same<T, opt::Interval>{});
+        for (size_t i = 0; i < N; ++i) {
+            data[i] = T(array[2 * i],array[2 * i + 1]);
         }
     }
 
@@ -49,19 +69,19 @@ public:
     }
 
     VectorBasic(const T(&array)[N]) {
-        data = new T[N];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         std::copy(std::begin(array), std::end(array), data);
     }
 
     VectorBasic(double* ptr) {
-        data = new T[N];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         for (size_t i = 0; i < N; ++i) {
             if(ptr[2 * i] <=ptr[2 * i + 1])     data[i] = T(ptr[2 * i], ptr[2 * i + 1]);
             else                                data[i] = T(ptr[2 * i+1], ptr[2 * i]);
         }
     }
 
-    // Weektory
+    
     friend VectorBasic<T, N> operator+(const VectorBasic<T, N>& fst, const VectorBasic<T, N>& scd) {
         VectorBasic<T, N> res(true);
         for (size_t i = 0; i < N; ++i) {
@@ -150,7 +170,7 @@ public:
     }
 
     friend VectorBasic<T, N> operator+(const VectorBasic<T, N>& fst, const T& scl) {
-        VectorBasic<T, N> res;
+        VectorBasic<T, N> res(true);
         for (size_t i = 0; i < N; ++i) {
             res[i] = fst[i] + scl;
         }
@@ -158,7 +178,7 @@ public:
     }
 
     friend VectorBasic<T, N> operator-(const VectorBasic<T, N>& fst, const T& scl) {
-        VectorBasic<T, N> res;
+        VectorBasic<T, N> res(true);
         for (size_t i = 0; i < N; ++i) {
             res[i] = fst[i] - scl;
         }
@@ -166,7 +186,7 @@ public:
     }
 
     friend VectorBasic<T, N> operator*(const VectorBasic<T, N>& fst, const T& scl) {
-        VectorBasic<T, N> res;
+        VectorBasic<T, N> res(true);
         for (size_t i = 0; i < N; ++i) {
            res[i] = fst[i] * scl;
         }
@@ -174,7 +194,7 @@ public:
     }
 
     friend VectorBasic<T, N> operator/(const VectorBasic<T, N>& fst, const T& scl) {
-        VectorBasic<T, N> res;
+        VectorBasic<T, N> res(true);
         for (size_t i = 0; i < N; ++i) {
             res[i] = fst[i] / scl;
         }

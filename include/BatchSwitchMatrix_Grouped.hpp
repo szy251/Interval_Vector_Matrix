@@ -2,7 +2,8 @@
 #define MATRIX_BATCH_GRP_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.h>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <MatrixBasic.hpp>
 #include <BatchSwitchMatrixMixed.hpp>
@@ -12,7 +13,7 @@ template<size_t N, size_t M>
 class BatchSwitchMatrix_Grouped
 {
 private:
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     double* low = nullptr; // Dolne wartości
     double* up = nullptr;  // Górne wartości
 
@@ -31,6 +32,8 @@ private:
         }
     };
 public:
+    static constexpr size_t rows = N;
+    static constexpr size_t cols = M;
     BatchSwitchMatrix_Grouped(bool allocateOnly) {
         if (allocateOnly) {
             low = new double[N*M];
@@ -105,6 +108,7 @@ public:
     friend BatchSwitchMatrix_Grouped<M1, N1> transposition(const BatchSwitchMatrix_Grouped<N1,M1>& fst);
 
     friend BatchSwitchMatrix_Grouped operator+(const BatchSwitchMatrix_Grouped& fst, const BatchSwitchMatrix_Grouped& scd) {
+        
         BatchSwitchMatrix_Grouped result(true);
         capd::rounding::DoubleRounding::roundDown();
         for (size_t i = 0; i < N*M; ++i) {
@@ -129,121 +133,125 @@ public:
         return result;
     }
     
-    /*
-    template <size_t P>
-    BatchSwitchMatrix_Grouped<N, P> operator*(const BatchSwitchMatrix_Grouped<M, P>& fst) {
-        BatchSwitchMatrix_Grouped<N,P> result(true);
-        BatchSwitchMatrix_Grouped<P,M> pom = transposition(fst);
+    //mnożenie z reorganizacją danych
 
-        capd::rounding::DoubleRounding::roundDown();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < P; ++j) {
-            double sum = 0;
-                for (size_t k = 0; k < M; ++k) {
-                    // Obliczenie wspólnych indeksów
-                    size_t idx1 = i * M + k;
-                    size_t idx2 = j * M + k;
+    // template <size_t P>
+    // BatchSwitchMatrix_Grouped<N, P> operator*(const BatchSwitchMatrix_Grouped<M, P>& fst) {
+    //     BatchSwitchMatrix_Grouped<N,P> result(true);
+    //     BatchSwitchMatrix_Grouped<P,M> pom = transposition(fst);
 
-                    // Pobranie wartości z macierzy
-                    double a_min = low[idx1];
-                    double a_max = up[idx1];
-                    double b_min = fst.low[idx2];
-                    double b_max = fst.up[idx2];
+    //     capd::rounding::DoubleRounding::roundDown();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t j = 0; j < P; ++j) {
+    //         double sum = 0;
+    //             for (size_t k = 0; k < M; ++k) {
+    //                 // Obliczenie wspólnych indeksów
+    //                 size_t idx1 = i * M + k;
+    //                 size_t idx2 = j * M + k;
 
-                    // Pomijanie zerowych przedziałów
-                    if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
-                        continue;
-                    }
+    //                 // Pobranie wartości z macierzy
+    //                 double a_min = low[idx1];
+    //                 double a_max = up[idx1];
+    //                 double b_min = fst.low[idx2];
+    //                 double b_max = fst.up[idx2];
 
-                    // Różne przypadki obliczeniowe
-                    if (a_min >= 0) {
-                        // Przedział dodatni (++) 
-                        if (b_min >= 0) {
-                            sum += a_min * b_min; // (++) * (++)
-                        } else {
-                            sum += a_max * b_min; // (++) * (-+), (++) * (--)
-                        }
-                    } else if (a_max <= 0) {
-                        // Przedział ujemny (--)
-                        if (b_max <= 0) {
-                            sum += a_max * b_max; // (--) * (--)
-                        } else {
-                            sum += a_min * b_max; // (--) * (+-), (--) * (++)
-                        }
-                    } else {
-                        // Przedział mieszany (-+)
-                        if (b_max <= 0) {
-                            sum += a_max * b_min; // (-+) * (--)
-                        } else if (b_min >= 0) {
-                            sum += a_min * b_max; // (-+) * (++)
-                        } else {
-                            // (-+) * (-+), wybór mniejszej wartości
-                            double t = a_min * b_max;
-                            double z = a_max * b_min;
-                            sum += (z < t) ? z : t;
-                        }
-                    }
-                }
-                result.low[i*P+j] = sum;
-            }
-        }
+    //                 // Pomijanie zerowych przedziałów
+    //                 if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
+    //                     continue;
+    //                 }
+
+    //                 // Różne przypadki obliczeniowe
+    //                 if (a_min >= 0) {
+    //                     // Przedział dodatni (++) 
+    //                     if (b_min >= 0) {
+    //                         sum += a_min * b_min; // (++) * (++)
+    //                     } else {
+    //                         sum += a_max * b_min; // (++) * (-+), (++) * (--)
+    //                     }
+    //                 } else if (a_max <= 0) {
+    //                     // Przedział ujemny (--)
+    //                     if (b_max <= 0) {
+    //                         sum += a_max * b_max; // (--) * (--)
+    //                     } else {
+    //                         sum += a_min * b_max; // (--) * (+-), (--) * (++)
+    //                     }
+    //                 } else {
+    //                     // Przedział mieszany (-+)
+    //                     if (b_max <= 0) {
+    //                         sum += a_max * b_min; // (-+) * (--)
+    //                     } else if (b_min >= 0) {
+    //                         sum += a_min * b_max; // (-+) * (++)
+    //                     } else {
+    //                         // (-+) * (-+), wybór mniejszej wartości
+    //                         double t = a_min * b_max;
+    //                         double z = a_max * b_min;
+    //                         sum += (z < t) ? z : t;
+    //                     }
+    //                 }
+    //             }
+    //             result.low[i*P+j] = sum;
+    //         }
+    //     }
 
 
-         capd::rounding::DoubleRounding::roundUp();
-        for (size_t i = 0; i < N; ++i) {
-            for (size_t j = 0; j < P; ++j) {
-            double sum = 0;
-                for (size_t k = 0; k < M; ++k) {
-                    // Obliczenie wspólnych indeksów
-                    size_t idx1 = i * M + k;
-                    size_t idx2 = j * M + k;
+    //      capd::rounding::DoubleRounding::roundUp();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t j = 0; j < P; ++j) {
+    //         double sum = 0;
+    //             for (size_t k = 0; k < M; ++k) {
+    //                 // Obliczenie wspólnych indeksów
+    //                 size_t idx1 = i * M + k;
+    //                 size_t idx2 = j * M + k;
 
-                    // Pobranie wartości z macierzy
-                    double a_min = low[idx1];
-                    double a_max = up[idx1];
-                    double b_min = fst.low[idx2];
-                    double b_max = fst.up[idx2];
+    //                 // Pobranie wartości z macierzy
+    //                 double a_min = low[idx1];
+    //                 double a_max = up[idx1];
+    //                 double b_min = fst.low[idx2];
+    //                 double b_max = fst.up[idx2];
 
-                    // Pomijanie zerowych przedziałów
-                    if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
-                        continue;
-                    }
+    //                 // Pomijanie zerowych przedziałów
+    //                 if ((a_min == 0 && a_max == 0) || (b_min == 0 && b_max == 0)) {
+    //                     continue;
+    //                 }
 
-                    // Różne przypadki obliczeniowe
-                    if (a_min >= 0) {
-                        // Przedział dodatni (++) 
-                        if (b_max <= 0) {
-                            sum += a_min * b_max; // (++) * (--)
-                        } else {
-                            sum += a_max * b_max; // (++) * (-+), (++) * (++)
-                        }
-                    } else if (a_max <= 0) {
-                        // Przedział ujemny (--)
-                        if (b_min >= 0) {
-                            sum += a_max * b_min; // (--) * (++)
-                        } else {
-                            sum += a_min * b_min; // (--) * (-+), (--) * (--)
-                        }
-                    } else {
-                        // Przedział mieszany (-+)
-                        if (b_max <= 0) {
-                            sum += a_min * b_min; // (-+) * (--)
-                        } else if (b_min >= 0) {
-                            sum += a_max * b_max; // (-+) * (++)
-                        } else {
-                            // (-+) * (-+), wybór większej wartości
-                            double t = a_min * b_min;
-                            double z = a_max * b_max;
-                            sum += (z > t) ? z : t;
-                        }
-                    }
-                }
-                result.up[i*P+j] = sum;
-            }
-        }
+    //                 // Różne przypadki obliczeniowe
+    //                 if (a_min >= 0) {
+    //                     // Przedział dodatni (++) 
+    //                     if (b_max <= 0) {
+    //                         sum += a_min * b_max; // (++) * (--)
+    //                     } else {
+    //                         sum += a_max * b_max; // (++) * (-+), (++) * (++)
+    //                     }
+    //                 } else if (a_max <= 0) {
+    //                     // Przedział ujemny (--)
+    //                     if (b_min >= 0) {
+    //                         sum += a_max * b_min; // (--) * (++)
+    //                     } else {
+    //                         sum += a_min * b_min; // (--) * (-+), (--) * (--)
+    //                     }
+    //                 } else {
+    //                     // Przedział mieszany (-+)
+    //                     if (b_max <= 0) {
+    //                         sum += a_min * b_min; // (-+) * (--)
+    //                     } else if (b_min >= 0) {
+    //                         sum += a_max * b_max; // (-+) * (++)
+    //                     } else {
+    //                         // (-+) * (-+), wybór większej wartości
+    //                         double t = a_min * b_min;
+    //                         double z = a_max * b_max;
+    //                         sum += (z > t) ? z : t;
+    //                     }
+    //                 }
+    //             }
+    //             result.up[i*P+j] = sum;
+    //         }
+    //     }
 
-        return result;
-    } */
+    //     return result;
+    // } 
+
+
+    //mnożenie z roarganizacją + preklasyfikacja
 
     // template <size_t P>
     // BatchSwitchMatrix_Grouped<N, P> operator*(const BatchSwitchMatrix_Grouped<M, P>& fst) {
@@ -359,88 +367,77 @@ public:
     //     return result;
     // }
 
+
+    // standardowe 
+
      template <size_t P>
     BatchSwitchMatrix_Grouped<N, P> operator*(const BatchSwitchMatrix_Grouped<M, P>& fst) {
         BatchSwitchMatrix_Grouped<N, P> result{};
-
-        // Precompute types for matrices
-        char* a_type = new char[N * M];
-        char* b_type = new char[P * M];
-
-        for (size_t i = 0; i < N * M; ++i) {
-            a_type[i] = type_mtrx(low[i], up[i]);
-        }
-
-        for (size_t i = 0; i < P * M; ++i) {
-            b_type[i] = type_mtrx(fst.low[i], fst.up[i]);
-        }
         double tmp;
         // Round down pass
         capd::rounding::DoubleRounding::roundDown();
         for (size_t i = 0; i < N; ++i) {
             for (size_t k = 0; k < M; ++k) {
                 size_t idx1 = i * M + k;
-                double lower =  low[idx1];
-                double upp = up[idx1];
-                char type1 = a_type[idx1];
-                    switch (type1) {
-                        case 1:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
+                double m_right =  up[idx1];
+                double m_left = low[idx1];
 
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                                if (type2 == 1) tmp = lower * fst.low[idx2];
-                                else tmp= upp * fst.low[idx2];
-                                result.low[i * P + j] = result.low[i * P + j] + tmp;
+                    if(m_right == 0.0 && m_left == 0.0){}
+                    else if(m_right <= 0.0)     // (--)
+                    {
+                        for (size_t j = 0; j < P; ++j){
+                            size_t idx2 = k * P +j;
+                            if(fst.up[idx2] <= 0.0)   // (--)(--)
+                            {
+                                tmp= m_right * fst.up[idx2];
                             }
-                            break;
-                        }
-                        case 2:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                            if (type2 == 2) tmp =  upp * fst.up[idx2];
-                            else tmp= lower * fst.up[idx2];
+                            else                      // (--)(-+) (--)(++)
+                            {
+                                tmp = m_left * fst.up[idx2];
+                            }
                             result.low[i * P + j] = result.low[i * P + j] + tmp;
-                            }
-                            break;
-                        }
-                        case 3:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
 
-                                char type2 = b_type[idx2];
-
-                                switch (type2) {
-                                    case 1:
-                                        tmp = lower * fst.up[idx2];
-                                        break;
-                                    case 2:
-                                        tmp = upp * fst.low[idx2];
-                                        break;
-                                    case 3:{
-                                        double t = lower * fst.up[idx2];
-                                        double z = upp * fst.low[idx2];
-                                        tmp = std::min(t, z);
-                                        break;
-                                    }
-                                    default:
-                                        continue;
-                                }
-                                result.low[i * P + j] = result.low[i * P + j] + tmp;
-                            }
-                            break;
                         }
-                    }   
+                    }
+                    else                // (m_right > 0)
+                    if(m_left >= 0.0)   //  (++)
+                    {
+                        for (size_t j = 0; j < P; ++j){
+                            size_t idx2 = k * P +j;
+                            if(fst.low[idx2] >= 0.0)   // (++)(++)
+                            {
+                                tmp = m_left * fst.low[idx2];
+                            }
+                            else                       // (++)(-+) (++)(--)
+                            {
+                                tmp = m_right * fst.low[idx2];
+                            }
+                            result.low[i * P + j] = result.low[i * P + j] + tmp;
+                        }
+                    }
+                    else //  m_left<=0 && m_right>=0 (-+)
+                    {
+                        for (size_t j = 0; j < P; ++j){
+                            size_t idx2 = k * P +j;
+                            if(fst.up[idx2] <= 0.0)    // (-+)(--)
+                            {
+                                tmp = m_right * fst.low[idx2];
+                            }
+                            else
+                            if(fst.low[idx2] >= 0.0)    // (-+)(++)
+                            {
+                            tmp = m_left * fst.up[idx2];
+                            }
+                            else                        // (-+)(-+)
+                            {
+                                double t1 = m_left * fst.up[idx2];
+                                double t2 = m_right * fst.low[idx2];
+                                tmp = (t1 > t2)? t2 : t1;
+                            }
+                            result.low[i * P + j] = result.low[i * P + j] + tmp;
+                        }
+                    }
+
             }
         }
 
@@ -449,75 +446,232 @@ public:
         for (size_t i = 0; i < N; ++i) {
             for (size_t k = 0; k < M; ++k) {
                 size_t idx1 = i * M + k;
-                double lower =  low[idx1];
-                double upp = up[idx1];
-                char type1 = a_type[idx1];
-                    switch (type1) {
-                        case 1:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                                if (type2 == 2) tmp = lower * fst.up[idx2];
-                                else tmp = upp * fst.up[idx2];
-                                result.up[i * P + j] = result.up[i * P + j] + tmp;
-                            }
-                            break;
+                double m_right =  up[idx1];
+                double m_left = low[idx1];
+                if(m_right == 0.0 && m_left == 0.0){}
+                else if (m_right <= 0.0)     // (--)
+                {
+                    for (size_t j = 0; j < P; ++j){
+                        size_t idx2 = k * P +j;
+                        if(fst.low[idx2] >= 0.0)  // (--)(++)
+                        {
+                            tmp = m_right * fst.low[idx2];
                         }
-                        case 2:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                if (type2 == 0) {
-                                    continue;
-                                }
-                                if (type2 == 1) tmp = upp * fst.low[idx2];
-                                else tmp = lower * fst.low[idx2];
-                                result.up[i * P + j] = result.up[i * P + j] + tmp;
-                            }
-                            break;
+                        else                      // (--)(-+) (--)(--)
+                        {
+                            tmp = m_left * fst.low[idx2];
                         }
-                        case 3:{
-                            for (size_t j = 0; j < P; ++j) {
-                                size_t idx2 = k * P +j;
-
-                                char type2 = b_type[idx2];
-
-                                switch (type2) {
-                                case 1:
-                                    tmp = upp * fst.up[idx2];
-                                    break;
-                                case 2:
-                                    tmp = lower * fst.low[idx2];
-                                    break;
-                                case 3:{
-                                    double t = lower * fst.low[idx2];
-                                    double z = upp * fst.up[idx2];
-                                    tmp = std::max(t, z);
-                                    break;
-                                }
-                                default:
-                                    continue;
-                                }
-                                result.up[i * P + j] = result.up[i * P + j] + tmp;
-                            }
-                            break;
-                        }
+                        result.up[i * P + j] = result.up[i * P + j] + tmp;
                     }
-                    
+                }
+                else                // (m_right > 0)
+                if(m_left >= 0.0)   //  (++)
+                {
+                    for (size_t j = 0; j < P; ++j){
+                        size_t idx2 = k * P +j;
+                        if(fst.up[idx2] <= 0.0)   // (++)(--)
+                        {
+                            tmp = m_left * fst.up[idx2];
+                        }
+                        else                       // (++)(-+) (++)(++)
+                        {
+                            tmp = m_right * fst.up[idx2];
+                        }
+                        result.up[i * P + j] = result.up[i * P + j] + tmp;
+                    }
+                }
+                else //  m_left<=0 && m_right>=0 (-+)
+                {
+                    for (size_t j = 0; j < P; ++j){
+                        size_t idx2 = k * P +j;
+                        if(fst.up[idx2] <= 0.0)    // (-+)(--)
+                        {
+                            tmp = m_left * fst.low[idx2];
+                        }
+                        else
+                        if(fst.low[idx2] >= 0.0 )    // (-+)(++)
+                        {
+                            tmp = m_right * fst.up[idx2];
+                        }
+                        else                        // (-+)(-+)
+                        {
+                            double t1 = m_left * fst.low[idx2];
+                            double t2 = m_right * fst.up[idx2];
+                            tmp = (t1 < t2)? t2 : t1;
+                        }
+                        result.up[i * P + j] = result.up[i * P + j] + tmp;
+                    }
+                }
+                   
             }
         }
-
-        delete[] a_type;
-        delete[] b_type;
         return result;
     }
+
+
+
+    //mnożenie z preklasyfikacją
+
+
+    //  template <size_t P>
+    // BatchSwitchMatrix_Grouped<N, P> operator*(const BatchSwitchMatrix_Grouped<M, P>& fst) {
+    //     BatchSwitchMatrix_Grouped<N, P> result{};
+
+    //     // Precompute types for matrices
+    //     char* a_type = new char[N * M];
+    //     char* b_type = new char[P * M];
+
+    //     for (size_t i = 0; i < N * M; ++i) {
+    //         a_type[i] = type_mtrx(low[i], up[i]);
+    //     }
+
+    //     for (size_t i = 0; i < P * M; ++i) {
+    //         b_type[i] = type_mtrx(fst.low[i], fst.up[i]);
+    //     }
+    //     double tmp;
+    //     // Round down pass
+    //     capd::rounding::DoubleRounding::roundDown();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t k = 0; k < M; ++k) {
+    //             size_t idx1 = i * M + k;
+    //             double lower =  low[idx1];
+    //             double upp = up[idx1];
+    //             char type1 = a_type[idx1];
+    //                 switch (type1) {
+    //                     case 1:{
+    //                         for (size_t j = 0; j < P; ++j) {
+    //                             size_t idx2 = k * P +j;
+
+    //                             char type2 = b_type[idx2];
+
+    //                             // if (type2 == 0) {
+    //                             //     continue;
+    //                             // }
+    //                             if (type2 == 1) tmp = lower * fst.low[idx2];
+    //                             else tmp= upp * fst.low[idx2];
+    //                             result.low[i * P + j] = result.low[i * P + j] + tmp;
+    //                         }
+    //                         break;
+    //                     }
+    //                     case 2:{
+    //                         for (size_t j = 0; j < P; ++j) {
+    //                             size_t idx2 = k * P +j;
+
+    //                             char type2 = b_type[idx2];
+
+    //                             // if (type2 == 0) {
+    //                             //     continue;
+    //                             // }
+    //                         if (type2 == 2) tmp =  upp * fst.up[idx2];
+    //                         else tmp= lower * fst.up[idx2];
+    //                         result.low[i * P + j] = result.low[i * P + j] + tmp;
+    //                         }
+    //                         break;
+    //                     }
+    //                     case 3:{
+    //                         for (size_t j = 0; j < P; ++j) {
+    //                             size_t idx2 = k * P +j;
+
+    //                             char type2 = b_type[idx2];
+
+    //                             switch (type2) {
+    //                                 case 1:
+    //                                     tmp = lower * fst.up[idx2];
+    //                                     break;
+    //                                 case 2:
+    //                                     tmp = upp * fst.low[idx2];
+    //                                     break;
+    //                                 case 3:{
+    //                                     double t = lower * fst.up[idx2];
+    //                                     double z = upp * fst.low[idx2];
+    //                                     tmp = std::min(t, z);
+    //                                     break;
+    //                                 }
+    //                                 default:
+    //                                     continue;
+    //                             }
+    //                             result.low[i * P + j] = result.low[i * P + j] + tmp;
+    //                         }
+    //                         break;
+    //                     }
+    //                 }   
+    //         }
+    //     }
+
+    //     // Round up pass
+    //     capd::rounding::DoubleRounding::roundUp();
+    //     for (size_t i = 0; i < N; ++i) {
+    //         for (size_t k = 0; k < M; ++k) {
+    //             size_t idx1 = i * M + k;
+    //             double lower =  low[idx1];
+    //             double upp = up[idx1];
+    //             char type1 = a_type[idx1];
+    //                 switch (type1) {
+    //                     case 1:{
+    //                         for (size_t j = 0; j < P; ++j) {
+    //                             size_t idx2 = k * P +j;
+
+    //                             char type2 = b_type[idx2];
+
+    //                             // if (type2 == 0) {
+    //                             //     continue;
+    //                             // }
+    //                             if (type2 == 2) tmp = lower * fst.up[idx2];
+    //                             else tmp = upp * fst.up[idx2];
+    //                             result.up[i * P + j] = result.up[i * P + j] + tmp;
+    //                         }
+    //                         break;
+    //                     }
+    //                     case 2:{
+    //                         for (size_t j = 0; j < P; ++j) {
+    //                             size_t idx2 = k * P +j;
+
+    //                             char type2 = b_type[idx2];
+
+    //                             // if (type2 == 0) {
+    //                             //     continue;
+    //                             // }
+    //                             if (type2 == 1) tmp = upp * fst.low[idx2];
+    //                             else tmp = lower * fst.low[idx2];
+    //                             result.up[i * P + j] = result.up[i * P + j] + tmp;
+    //                         }
+    //                         break;
+    //                     }
+    //                     case 3:{
+    //                         for (size_t j = 0; j < P; ++j) {
+    //                             size_t idx2 = k * P +j;
+
+    //                             char type2 = b_type[idx2];
+
+    //                             switch (type2) {
+    //                             case 1:
+    //                                 tmp = upp * fst.up[idx2];
+    //                                 break;
+    //                             case 2:
+    //                                 tmp = lower * fst.low[idx2];
+    //                                 break;
+    //                             case 3:{
+    //                                 double t = lower * fst.low[idx2];
+    //                                 double z = upp * fst.up[idx2];
+    //                                 tmp = std::max(t, z);
+    //                                 break;
+    //                             }
+    //                             default:
+    //                                 continue;
+    //                             }
+    //                             result.up[i * P + j] = result.up[i * P + j] + tmp;
+    //                         }
+    //                         break;
+    //                     }
+    //                 }
+                    
+    //         }
+    //     }
+
+    //     delete[] a_type;
+    //     delete[] b_type;
+    //     return result;
+    // }
 
     BatchSwitchMatrix_Grouped & operator+=(const BatchSwitchMatrix_Grouped& fst){
         *this = *this+fst;
@@ -663,7 +817,7 @@ public:
                     {
                         double k = fst.low[i]*scd.leftBound();
                         if(fst.up[i] > 0. ){
-                            result.up[i] = std::min(k,fst.up[i]*scd.rightBound());
+                            result.up[i] = std::max(k,fst.up[i]*scd.rightBound());
                         }
                         else result.up[i] = k;
                     }
@@ -705,7 +859,7 @@ public:
         case 3:
         case 5:
         case 7:
-            throw std::invalid_argument("Scalat has 0 in it");
+            throw std::invalid_argument("Scalar has 0 in it");
         case 1:{
             BatchSwitchMatrix_Grouped result(true);
             capd::rounding::DoubleRounding::roundDown();
@@ -787,6 +941,27 @@ public:
         Accessor acc = {low,up};
         size_t ind = j*M+k;
         return IntervalProxy<Accessor,size_t>(acc,ind);
+    }
+    IntervalProxy<Accessor,size_t> operator()(size_t j, size_t k) const{
+        Accessor acc = {low,up};
+        size_t ind = j*M+k;
+        return IntervalProxy<Accessor,size_t>(acc,ind);
+    }
+
+    friend std::ostream& operator<<(std::ostream & ost, const BatchSwitchMatrix_Grouped & Mtr){
+        ost << "[ ";
+        for(size_t i = 0; i < N-1; i++){
+            for(size_t j=0 ; j< M; j++){
+                ost << Mtr(i,j) << " ";
+            }
+            ost << '\n' << "  ";
+        }
+        for(size_t j = 0; j< M; j++){
+            ost << Mtr(N-1,j) << " ";
+        }
+        ost<<"]";
+        return ost;
+
     }
 
     ~BatchSwitchMatrix_Grouped() {

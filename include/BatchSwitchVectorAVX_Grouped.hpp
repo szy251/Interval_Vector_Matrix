@@ -2,7 +2,8 @@
 #define VECTOR_BATCH_AVX_GRP_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.hpp>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
 #include <immintrin.h>
@@ -13,7 +14,7 @@ class BatchSwitchVectorAVX_Grouped
 private:
     __m256d* lower = nullptr;
     __m256d* upper = nullptr;
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     static constexpr size_t vectors_count = (N+3)/4;
     static constexpr size_t full_vectors = N/4;
     static constexpr size_t rest = N % 4;

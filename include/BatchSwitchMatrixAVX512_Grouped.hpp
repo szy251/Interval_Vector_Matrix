@@ -2,7 +2,8 @@
 #define MATRIX_BATCH_AVX512_GRP_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.hpp>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
 #include <MatrixBasic.hpp>
@@ -37,11 +38,12 @@ class BatchSwitchMatrixAVX512_Grouped
 private:
     __m512d* lower = nullptr;
     __m512d* upper = nullptr;
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     static constexpr size_t vectors_count_row = (M+7)/8;
     static constexpr size_t vectors_count = vectors_count_row*N;
     static constexpr size_t full_vectors = M/8;
     static constexpr size_t rest = M % 8;
+    static constexpr bool enable_parallel = (N>=100) &&  (M>=100);
 
     template<size_t N1,size_t M1>
     friend class BatchSwitchMatrixAVX512_Grouped;
@@ -154,19 +156,42 @@ private:
     }
 };
 public:
+    static constexpr size_t rows = N;
+    static constexpr size_t cols = M;
     BatchSwitchMatrixAVX512_Grouped(){
+    if constexpr (enable_parallel){
+        lower = new alignas(64) __m512d[vectors_count];
+        upper = new alignas(64) __m512d[vectors_count];
+        #pragma omp parallel for
+        for(size_t i = 0; i < vectors_count; i++){
+            lower[i] = _mm512_setzero_pd();
+            upper[i] = _mm512_setzero_pd();
+        }
+    }
+    else{
         lower = new alignas(64) __m512d[vectors_count]();
         upper = new alignas(64) __m512d[vectors_count]();
     }
+}
 
     BatchSwitchMatrixAVX512_Grouped(const BatchSwitchMatrixAVX512_Grouped& cpy){
-        lower = new alignas(64) __m512d[vectors_count];
-        upper = new alignas(64) __m512d[vectors_count];
+    lower = new alignas(64) __m512d[vectors_count];
+    upper = new alignas(64) __m512d[vectors_count];
+    
+    if constexpr (enable_parallel){
+        #pragma omp parallel for
+        for(size_t i = 0; i < vectors_count; i++){
+            lower[i] = cpy.lower[i];
+            upper[i] = cpy.upper[i];
+        }
+    }
+    else{
         for(size_t i = 0; i < vectors_count; i++) {
             lower[i] = cpy.lower[i];
             upper[i] = cpy.upper[i];
         }
     }
+}
 
     BatchSwitchMatrixAVX512_Grouped(BatchSwitchMatrixAVX512_Grouped&& cpy) noexcept {
         lower = cpy.lower;
@@ -176,14 +201,14 @@ public:
     }
 
     BatchSwitchMatrixAVX512_Grouped(const double(&array)[2 * N * M]){
-        lower = new alignas(64) __m512d[vectors_count];
-        upper = new alignas(64) __m512d[vectors_count];
+    lower = new alignas(64) __m512d[vectors_count];
+    upper = new alignas(64) __m512d[vectors_count];
 
-
+    if constexpr (enable_parallel){
+        #pragma omp parallel for
         for (size_t row = 0; row < N; ++row) {
-            size_t offset = row * M * 2; // Przesunięcie w tablicy 1D reprezentującej macierz
+            size_t offset = row * M * 2;
             
-            // Wczytaj pełne wektory (4-elementowe grupy)
             for (size_t i = 0; i < full_vectors * 16; i += 16) {
                 __m512d a = _mm512_set_pd(
                     array[offset + i + 14],
@@ -210,13 +235,12 @@ public:
                 upper[vector_index] = b;
             }
 
-            // Obsłuż resztę (jeśli istnieje)
             if (rest > 0) {
                 double temp_lower[8] = {};
                 double temp_upper[8] = {};
                 for (size_t i = 0; i < rest; ++i) {
-                    temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
-                    temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+                    temp_lower[i] = array[offset + (2 * M - 2 * rest) + 2 * i];
+                    temp_upper[i] = array[offset + (2 * M - 2 * rest) + 2 * i + 1];
                 }
                 size_t vector_index = row * vectors_count_row + full_vectors;
                 lower[vector_index] = _mm512_load_pd(temp_lower);
@@ -224,19 +248,10 @@ public:
             }
         }
     }
-
-    BatchSwitchMatrixAVX512_Grouped(const std::vector<double>& array) {
-        if (array.size() != 2 * N * M) {
-            throw std::invalid_argument("Rozmiar wektora musi wynosić dokładnie 2 * N * M.");
-        }
-        lower = new alignas(64) __m512d[vectors_count];
-        upper = new alignas(64) __m512d[vectors_count];
-
-
+    else{
         for (size_t row = 0; row < N; ++row) {
-            size_t offset = row * M * 2; // Przesunięcie w tablicy 1D reprezentującej macierz
+            size_t offset = row * M * 2;
             
-            // Wczytaj pełne wektory (4-elementowe grupy)
             for (size_t i = 0; i < full_vectors * 16; i += 16) {
                 __m512d a = _mm512_set_pd(
                     array[offset + i + 14],
@@ -263,7 +278,59 @@ public:
                 upper[vector_index] = b;
             }
 
-            // Obsłuż resztę (jeśli istnieje)
+            if (rest > 0) {
+                double temp_lower[8] = {};
+                double temp_upper[8] = {};
+                for (size_t i = 0; i < rest; ++i) {
+                    temp_lower[i] = array[offset + (2 * M - 2 * rest) + 2 * i];
+                    temp_upper[i] = array[offset + (2 * M - 2 * rest) + 2 * i + 1];
+                }
+                size_t vector_index = row * vectors_count_row + full_vectors;
+                lower[vector_index] = _mm512_load_pd(temp_lower);
+                upper[vector_index] = _mm512_load_pd(temp_upper);
+            }
+        }
+    }
+}
+
+   BatchSwitchMatrixAVX512_Grouped(const std::vector<double>& array) {
+    if (array.size() != 2 * N * M) {
+        throw std::invalid_argument("Rozmiar wektora musi wynosić dokładnie 2 * N * M.");
+    }
+    lower = new alignas(64) __m512d[vectors_count];
+    upper = new alignas(64) __m512d[vectors_count];
+
+    if constexpr (enable_parallel){
+        #pragma omp parallel for
+        for (size_t row = 0; row < N; ++row) {
+            size_t offset = row * M * 2;
+            
+            for (size_t i = 0; i < full_vectors * 16; i += 16) {
+                __m512d a = _mm512_set_pd(
+                    array[offset + i + 14],
+                    array[offset + i + 12],
+                    array[offset + i + 10],
+                    array[offset + i + 8],
+                    array[offset + i + 6],
+                    array[offset + i + 4],
+                    array[offset + i + 2],
+                    array[offset + i + 0]
+                );
+                __m512d b = _mm512_set_pd(
+                    array[offset + i + 15],
+                    array[offset + i + 13],
+                    array[offset + i + 11],
+                    array[offset + i + 9],
+                    array[offset + i + 7],
+                    array[offset + i + 5],
+                    array[offset + i + 3],
+                    array[offset + i + 1]
+                );
+                size_t vector_index = row * vectors_count_row + i / 16;
+                lower[vector_index] = a;
+                upper[vector_index] = b;
+            }
+
             if (rest > 0) {
                 double temp_lower[8] = {};
                 double temp_upper[8] = {};
@@ -277,21 +344,77 @@ public:
             }
         }
     }
+    else{
+        for (size_t row = 0; row < N; ++row) {
+            size_t offset = row * M * 2;
+            
+            for (size_t i = 0; i < full_vectors * 16; i += 16) {
+                __m512d a = _mm512_set_pd(
+                    array[offset + i + 14],
+                    array[offset + i + 12],
+                    array[offset + i + 10],
+                    array[offset + i + 8],
+                    array[offset + i + 6],
+                    array[offset + i + 4],
+                    array[offset + i + 2],
+                    array[offset + i + 0]
+                );
+                __m512d b = _mm512_set_pd(
+                    array[offset + i + 15],
+                    array[offset + i + 13],
+                    array[offset + i + 11],
+                    array[offset + i + 9],
+                    array[offset + i + 7],
+                    array[offset + i + 5],
+                    array[offset + i + 3],
+                    array[offset + i + 1]
+                );
+                size_t vector_index = row * vectors_count_row + i / 16;
+                lower[vector_index] = a;
+                upper[vector_index] = b;
+            }
+
+            if (rest > 0) {
+                double temp_lower[8] = {};
+                double temp_upper[8] = {};
+                for (size_t i = 0; i < rest; ++i) {
+                    temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
+                    temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+                }
+                size_t vector_index = row * vectors_count_row + full_vectors;
+                lower[vector_index] = _mm512_load_pd(temp_lower);
+                upper[vector_index] = _mm512_load_pd(temp_upper);
+            }
+        }
+    }
+}
 
     BatchSwitchMatrixAVX512_Grouped& operator=(const BatchSwitchMatrixAVX512_Grouped& fst) {
         if (this != &fst) {
-            delete[] lower;
-            delete[] upper;
-            if (fst.lower) {
-                lower = new alignas(64) __m512d[vectors_count];
-                upper = new alignas(32) __m512d[vectors_count];
-                for (size_t i = 0; i < vectors_count; ++i) {
-                    lower[i] = fst.lower[i];
-                    upper[i] = fst.upper[i];
-                }
-            } else {
+            if (fst.lower == nullptr) {
+                delete[] lower;
                 lower = nullptr;
+                delete[] upper;
                 upper = nullptr;
+            } else {
+                if (lower == nullptr) {
+                    lower = new alignas(64) __m512d[vectors_count];
+                    upper = new alignas(64) __m512d[vectors_count];
+                }
+                
+                if constexpr (enable_parallel) {
+                    #pragma omp parallel for
+                    for (size_t i = 0; i < vectors_count; ++i) {
+                        lower[i] = fst.lower[i];
+                        upper[i] = fst.upper[i];
+                    }
+                }
+                else {
+                    for (size_t i = 0; i < vectors_count; ++i) {
+                        lower[i] = fst.lower[i];
+                        upper[i] = fst.upper[i];
+                    } 
+                }
             }
         }
         return *this;
@@ -314,32 +437,79 @@ public:
 
 
     friend BatchSwitchMatrixAVX512_Grouped operator+(const BatchSwitchMatrixAVX512_Grouped& fst, const BatchSwitchMatrixAVX512_Grouped& scd) {
-        BatchSwitchMatrixAVX512_Grouped result(true);
+    BatchSwitchMatrixAVX512_Grouped result(true); 
+
+    if constexpr(enable_parallel)
+    {
+        #pragma omp parallel
+        { 
+            capd::rounding::DoubleRounding::roundDown();
+            #pragma omp for schedule(static) nowait
+            for(size_t i = 0; i < result.vectors_count; i++) {
+                result.lower[i] = _mm512_add_pd(fst.lower[i], scd.lower[i]);
+            }
+
+            capd::rounding::DoubleRounding::roundUp();
+            #pragma omp for schedule(static)
+            for(size_t i = 0; i < result.vectors_count; i++) {
+                result.upper[i] = _mm512_add_pd(fst.upper[i], scd.upper[i]);
+            }
+        }
+    }
+    else
+    {
         capd::rounding::DoubleRounding::roundDown();
-        for (size_t i = 0; i < result.vectors_count; i++) {
+        for(size_t i = 0; i < result.vectors_count; i++) {
             result.lower[i] = _mm512_add_pd(fst.lower[i], scd.lower[i]);
         }
 
         capd::rounding::DoubleRounding::roundUp();
-        for (size_t i = 0; i < result.vectors_count; i++) {
+        for(size_t i = 0; i < result.vectors_count; i++) {
             result.upper[i] = _mm512_add_pd(fst.upper[i], scd.upper[i]);
         }
-        return result;
     }
+    return result;
+}
 
     friend BatchSwitchMatrixAVX512_Grouped operator-(const BatchSwitchMatrixAVX512_Grouped& fst, const BatchSwitchMatrixAVX512_Grouped& scd) {
-        BatchSwitchMatrixAVX512_Grouped result(true);
+    BatchSwitchMatrixAVX512_Grouped result(true);
+    if constexpr(enable_parallel)
+    {
+        #pragma omp parallel
+        { 
+            capd::rounding::DoubleRounding::roundDown();
+            #pragma omp for schedule(static) nowait
+            for(size_t i = 0; i < result.vectors_count; i++) {
+                // Dolna granica wyniku: fst.lower - scd.upper
+                result.lower[i] = _mm512_sub_pd(fst.lower[i], scd.upper[i]);
+            }
+
+            capd::rounding::DoubleRounding::roundUp();
+            #pragma omp for schedule(static)
+            for(size_t i = 0; i < result.vectors_count; i++) {
+                // Górna granica wyniku: fst.upper - scd.lower
+                result.upper[i] = _mm512_sub_pd(fst.upper[i], scd.lower[i]);
+            }
+        }
+    }
+    else
+    {
         capd::rounding::DoubleRounding::roundDown();
-        for (size_t i = 0; i < result.vectors_count; i++) {
+        for(size_t i = 0; i < result.vectors_count; i++) {
             result.lower[i] = _mm512_sub_pd(fst.lower[i], scd.upper[i]);
         }
 
         capd::rounding::DoubleRounding::roundUp();
-        for (size_t i = 0; i < result.vectors_count; i++) {
+        for(size_t i = 0; i < result.vectors_count; i++) {
             result.upper[i] = _mm512_sub_pd(fst.upper[i], scd.lower[i]);
         }
-        return result;
     }
+    return result;
+}
+
+    //mnożenie z reorganizacją
+
+
     // template <size_t P>
     // BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Grouped<M, P>& fst) {
     //     BatchSwitchMatrixAVX512_Grouped<N, P> result(true);
@@ -433,11 +603,13 @@ public:
     //     return result;
     // }
 
+
+    //standard
     template <size_t P>
 BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Grouped<M, P>& fst) {
     BatchSwitchMatrixAVX512_Grouped<N, P> result{};
-    static constexpr bool enable_parallel = (N >= 24) && (M >= 24) && (P >=24);
-    if constexpr(enable_parallel){
+    static constexpr bool enable_parallel_mlt = (N >= 30) && (M >= 30) && (P >=30);
+    if constexpr(enable_parallel_mlt){
         #pragma omp parallel
         {
             capd::rounding::DoubleRounding::roundDown();
@@ -487,9 +659,8 @@ BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Gr
                 }
             }
 
-            #pragma omp barrier
+            //#pragma omp barrier
 
-            // Round up pass
             capd::rounding::DoubleRounding::roundUp();
             #pragma omp for
             for (size_t i = 0; i < N; ++i) {
@@ -585,7 +756,6 @@ BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Gr
             }
         }
 
-        // Round up pass
         capd::rounding::DoubleRounding::roundUp();
         for (size_t i = 0; i < N; ++i) {
             for (size_t k = 0; k < full_vectors; ++k) {
@@ -642,215 +812,483 @@ BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Gr
         return *this;
     }
 
-    friend BatchSwitchMatrixAVX512_Grouped operator+(const BatchSwitchMatrixAVX512_Grouped &fst, const Interval & scd){
-        BatchSwitchMatrixAVX512_Grouped result(true);
-        __m512d scalar = _mm512_set1_pd(scd.leftBound());
-        capd::rounding::DoubleRounding::roundDown();
-        for(size_t i = 0; i<result.vectors_count;i++){
-            result.lower[i] = _mm512_add_pd(fst.lower[i],scalar);
+  friend BatchSwitchMatrixAVX512_Grouped operator+(const BatchSwitchMatrixAVX512_Grouped &fst, const Interval & scd){
+    BatchSwitchMatrixAVX512_Grouped result(true); 
+    __m512d scalar_low = _mm512_set1_pd(scd.leftBound());
+    __m512d scalar_high = _mm512_set1_pd(scd.rightBound());
+
+    if constexpr (enable_parallel)
+    {
+        #pragma omp parallel
+        {
+            capd::rounding::DoubleRounding::roundDown();
+            #pragma omp for schedule(static) nowait
+            for(size_t i = 0; i < result.vectors_count; i++){
+                result.lower[i] = _mm512_add_pd(fst.lower[i], scalar_low);
+            }
+
+            capd::rounding::DoubleRounding::roundUp();
+            #pragma omp for schedule(static)
+            for(size_t i = 0; i < result.vectors_count; i++){
+                result.upper[i] = _mm512_add_pd(fst.upper[i], scalar_high);
+            }
         }
-        scalar = _mm512_set1_pd(scd.rightBound());
-        capd::rounding::DoubleRounding::roundUp();
-         for(size_t i = 0; i<result.vectors_count;i++){
-            result.upper[i] = _mm512_add_pd(fst.upper[i],scalar);
-        }
-        return result;
     }
-    friend BatchSwitchMatrixAVX512_Grouped operator-(const BatchSwitchMatrixAVX512_Grouped &fst, const Interval & scd){
-        BatchSwitchMatrixAVX512_Grouped result(true);
-        __m512d scalar = _mm512_set1_pd(scd.rightBound());
+    else
+    {
         capd::rounding::DoubleRounding::roundDown();
-        for(size_t i = 0; i<result.vectors_count;i++){
-            result.lower[i] = _mm512_sub_pd(fst.lower[i],scalar);
+        for(size_t i = 0; i < result.vectors_count; i++){
+            result.lower[i] = _mm512_add_pd(fst.lower[i], scalar_low);
         }
-        scalar = _mm512_set1_pd(scd.leftBound());
+
         capd::rounding::DoubleRounding::roundUp();
-         for(size_t i = 0; i<result.vectors_count;i++){
-            result.upper[i] = _mm512_sub_pd(fst.upper[i],scalar);
+        for(size_t i = 0; i < result.vectors_count; i++){
+            result.upper[i] = _mm512_add_pd(fst.upper[i], scalar_high);
         }
-        return result;
     }
+    return result;
+}
+
+friend BatchSwitchMatrixAVX512_Grouped operator-(const BatchSwitchMatrixAVX512_Grouped &fst, const Interval & scd){
+    BatchSwitchMatrixAVX512_Grouped result(true);
+  
+    __m512d scalar_for_lower = _mm512_set1_pd(scd.rightBound());
+    __m512d scalar_for_upper = _mm512_set1_pd(scd.leftBound()); 
+
+    if constexpr (enable_parallel)
+    {
+        #pragma omp parallel
+        {
+            capd::rounding::DoubleRounding::roundDown();
+            #pragma omp for schedule(static) nowait
+            for(size_t i = 0; i < result.vectors_count; i++){
+                result.lower[i] = _mm512_sub_pd(fst.lower[i], scalar_for_lower);
+            }
+
+            capd::rounding::DoubleRounding::roundUp();
+            #pragma omp for schedule(static)
+            for(size_t i = 0; i < result.vectors_count; i++){
+                result.upper[i] = _mm512_sub_pd(fst.upper[i], scalar_for_upper);
+            }
+        }
+    }
+    else
+    {
+        capd::rounding::DoubleRounding::roundDown();
+        for(size_t i = 0; i < result.vectors_count; i++){
+            result.lower[i] = _mm512_sub_pd(fst.lower[i], scalar_for_lower);
+        }
+
+        capd::rounding::DoubleRounding::roundUp();
+        for(size_t i = 0; i < result.vectors_count; i++){
+            result.upper[i] = _mm512_sub_pd(fst.upper[i], scalar_for_upper);
+        }
+    }
+    return result;
+}
     friend BatchSwitchMatrixAVX512_Grouped operator*(const BatchSwitchMatrixAVX512_Grouped &fst, const Interval & scd){
-        char type_scalar = type(scd.leftBound(),scd.rightBound());
+    char type_scalar = type(scd.leftBound(), scd.rightBound());
+
+    if constexpr(enable_parallel)
+    {
         switch(type_scalar)
         {
             case 0:
-                return BatchSwitchMatrixAVX512_Grouped ();
-            case 1:{
+                return BatchSwitchMatrixAVX512_Grouped();
+            case 1: {
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_mul_pd(fst.lower[i], scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_mul_pd(fst.upper[i], scalar);
+                    }
+                }
+                return result;
+            }
+            case 2: {
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_mul_pd(fst.upper[i], scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_mul_pd(fst.lower[i], scalar);
+                    }
+                }
+                return result;
+            }
+            case 3: {
+                __m512d scalar = _mm512_set1_pd(scd.rightBound());
+                __m512d zero = _mm512_setzero_pd();
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.lower[i], scalar), zero);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.upper[i], scalar), zero);
+                    }
+                }
+                return result;
+            }
+            case 4: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.lower[i], scalar1), _mm512_mul_pd(fst.lower[i], scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.upper[i], scalar1), _mm512_mul_pd(fst.upper[i], scalar2));
+                    }
+                }
+                return result;
+            }
+            case 5: {
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                __m512d zero = _mm512_setzero_pd();
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.upper[i], scalar), zero);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.lower[i], scalar), zero);
+                    }
+                }
+                return result;
+            }
+            case 6: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.upper[i], scalar1), _mm512_mul_pd(fst.upper[i], scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.lower[i], scalar1), _mm512_mul_pd(fst.lower[i], scalar2));
+                    }
+                }
+                return result;
+            }
+            case 7: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.upper[i], scalar1), _mm512_mul_pd(fst.lower[i], scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.lower[i], scalar1), _mm512_mul_pd(fst.upper[i], scalar2));
+                    }
+                }
+                return result;
+            }
+        }
+    }
+    else 
+    {
+        switch(type_scalar)
+        {
+            case 0:
+                return BatchSwitchMatrixAVX512_Grouped();
+            case 1: {
                 __m512d scalar = _mm512_set1_pd(scd.leftBound());
                 BatchSwitchMatrixAVX512_Grouped result(true);
                 capd::rounding::DoubleRounding::roundDown();
-                 for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_mul_pd(fst.lower[i],scalar);
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.upper[i] = _mm512_mul_pd(fst.upper[i],scalar);
                 }
                 return result;
             }
-            case 2:{
+            case 2: {
                 __m512d scalar = _mm512_set1_pd(scd.leftBound());
                 BatchSwitchMatrixAVX512_Grouped result(true);
                 capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_mul_pd(fst.upper[i],scalar);
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm512_mul_pd(fst.lower[i],scalar);
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.upper[i] = _mm512_mul_pd(fst.lower[i],scalar);
                 }
                 return result;
             }
-            case 3:{
+            case 3: {
                 __m512d scalar = _mm512_set1_pd(scd.rightBound());
                 __m512d zero = _mm512_setzero_pd();
                 BatchSwitchMatrixAVX512_Grouped result(true);
                 capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.lower[i],scalar),zero);
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.upper[i],scalar),zero);
                 }
                 return result;
             }
-            case 4:{
+            case 4: {
                 __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
                 __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
-
                 BatchSwitchMatrixAVX512_Grouped result(true);
-
                 capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.lower[i],scalar1),_mm512_mul_pd(fst.lower[i],scalar2));
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.upper[i],scalar1),_mm512_mul_pd(fst.upper[i],scalar2));
                 }
                 return result;
             }
-            case 5:{
+            case 5: {
                 __m512d scalar = _mm512_set1_pd(scd.leftBound());
                 __m512d zero = _mm512_setzero_pd();
-
                 BatchSwitchMatrixAVX512_Grouped result(true);
-
                 capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.upper[i],scalar),zero);
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                      result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.lower[i],scalar),zero);
                 }
                 return result;
             }
-            case 6:{
+            case 6: {
                 __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
                 __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
-
                 BatchSwitchMatrixAVX512_Grouped result(true);
-
                 capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.upper[i],scalar1),_mm512_mul_pd(fst.upper[i],scalar2));
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.lower[i],scalar1),_mm512_mul_pd(fst.lower[i],scalar2));
                 }
                 return result;
             }
-            case 7:{
+            case 7: {
                 __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
                 __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
-
                 BatchSwitchMatrixAVX512_Grouped result(true);
-
                 capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.lower[i] = _mm512_min_pd(_mm512_mul_pd(fst.upper[i],scalar1),_mm512_mul_pd(fst.lower[i],scalar2));
                 }
                 capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
+                for(size_t i = 0; i < result.vectors_count; i++){
                     result.upper[i] = _mm512_max_pd(_mm512_mul_pd(fst.lower[i],scalar1),_mm512_mul_pd(fst.upper[i],scalar2));
                 }
                 return result;
             }
         }
-        return BatchSwitchMatrixAVX512_Grouped ();
     }
+    return BatchSwitchMatrixAVX512_Grouped(); 
+}
     friend BatchSwitchMatrixAVX512_Grouped operator/(const BatchSwitchMatrixAVX512_Grouped &fst, const Interval & scd){
-        char type_scalar = type(scd.leftBound(),scd.rightBound());
+    char type_scalar = type(scd.leftBound(), scd.rightBound());
+
+    if constexpr(enable_parallel)
+    {
         switch (type_scalar)
         {
-        case 0:
-        case 3:
-        case 5:
-        case 7:
-            throw std::invalid_argument("Scalar has 0 in it");
-        case 1:{
-            __m512d scalar = _mm512_set1_pd(scd.leftBound());
-            BatchSwitchMatrixAVX512_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm512_div_pd(fst.lower[i],scalar);
+            case 0:
+            case 3:
+            case 5:
+            case 7:
+                throw std::invalid_argument("Scalar has 0 in it");
+            case 1: {
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_div_pd(fst.lower[i], scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_div_pd(fst.upper[i], scalar);
+                    }
+                }
+                return result;
             }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm512_div_pd(fst.upper[i],scalar);
+            case 2: {
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_div_pd(fst.upper[i], scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_div_pd(fst.lower[i], scalar);
+                    }
+                }
+                return result;
             }
-            return result;
+            case 4: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_div_pd(fst.lower[i], scalar1), _mm512_div_pd(fst.lower[i], scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_max_pd(_mm512_div_pd(fst.upper[i], scalar1), _mm512_div_pd(fst.upper[i], scalar2));
+                    }
+                }
+                return result;
+            }
+            case 6: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.lower[i] = _mm512_min_pd(_mm512_div_pd(fst.upper[i], scalar1), _mm512_div_pd(fst.upper[i], scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i < result.vectors_count; i++){
+                        result.upper[i] = _mm512_min_pd(_mm512_div_pd(fst.lower[i], scalar1), _mm512_div_pd(fst.lower[i], scalar2));
+                    }
+                }
+                return result;
+            }
         }
-        case 2:{
-            __m512d scalar = _mm512_set1_pd(scd.leftBound());
-            BatchSwitchMatrixAVX512_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm512_div_pd(fst.upper[i],scalar);
-            }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm512_div_pd(fst.lower[i],scalar);
-            }
-            return result;
-        }
-        case 4:{
-            __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
-            __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
-
-            BatchSwitchMatrixAVX512_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm512_min_pd(_mm512_div_pd(fst.lower[i],scalar1),_mm512_div_pd(fst.lower[i],scalar2));
-            }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm512_max_pd(_mm512_div_pd(fst.upper[i],scalar1),_mm512_div_pd(fst.upper[i],scalar2));
-            }
-            return result;
-        }
-        case 6:{
-            __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
-            __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
-
-            BatchSwitchMatrixAVX512_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm512_min_pd(_mm512_div_pd(fst.upper[i],scalar1),_mm512_div_pd(fst.upper[i],scalar2));
-            }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm512_min_pd(_mm512_div_pd(fst.lower[i],scalar1),_mm512_div_pd(fst.lower[i],scalar2));
-            }
-            return result;
-        }
-        }
-        return BatchSwitchMatrixAVX512_Grouped ();
     }
+    else
+    {
+        switch (type_scalar)
+        {
+            case 0:
+            case 3:
+            case 5:
+            case 7:
+                throw std::invalid_argument("Scalar has 0 in it");
+            case 1: {
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.lower[i] = _mm512_div_pd(fst.lower[i],scalar);
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.upper[i] = _mm512_div_pd(fst.upper[i],scalar);
+                }
+                return result;
+            }
+            case 2: {
+                __m512d scalar = _mm512_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.lower[i] = _mm512_div_pd(fst.upper[i],scalar);
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.upper[i] = _mm512_div_pd(fst.lower[i],scalar);
+                }
+                return result;
+            }
+            case 4: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.lower[i] = _mm512_min_pd(_mm512_div_pd(fst.lower[i],scalar1),_mm512_div_pd(fst.lower[i],scalar2));
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.upper[i] = _mm512_max_pd(_mm512_div_pd(fst.upper[i],scalar1),_mm512_div_pd(fst.upper[i],scalar2));
+                }
+                return result;
+            }
+            case 6: {
+                __m512d scalar1 = _mm512_set1_pd(scd.leftBound());
+                __m512d scalar2 = _mm512_set1_pd(scd.rightBound());
+                BatchSwitchMatrixAVX512_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.lower[i] = _mm512_min_pd(_mm512_div_pd(fst.upper[i],scalar1),_mm512_div_pd(fst.upper[i],scalar2));
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i < result.vectors_count; i++){
+                    result.upper[i] = _mm512_min_pd(_mm512_div_pd(fst.lower[i],scalar1),_mm512_div_pd(fst.lower[i],scalar2));
+                }
+                return result;
+            }
+        }
+    }
+    return BatchSwitchMatrixAVX512_Grouped(); 
+}
     BatchSwitchMatrixAVX512_Grouped & operator+=(const Interval& fst){
         *this = *this+fst;
         return *this;
@@ -871,10 +1309,10 @@ BatchSwitchMatrixAVX512_Grouped<N, P> operator*(const BatchSwitchMatrixAVX512_Gr
         for (size_t row = 0; row < N; ++row) {
         os << "Row " << row << ": ";
         for (size_t vec = 0; vec < matrix.vectors_count_row; ++vec) {
-            // Pobierz indeks wektora
+            
             size_t index = row * matrix.vectors_count_row + vec;
 
-            // Pobierz elementy z __m256d
+            
             alignas(64) double elements[8];
             _mm512_store_pd(elements, matrix.upper[index]);
 
@@ -926,7 +1364,6 @@ namespace details{
                          const __m512d& row4, const __m512d& row5, const __m512d& row6, const __m512d& row7,
                          __m512d& out0, __m512d& out1, __m512d& out2, __m512d& out3,
                          __m512d& out4, __m512d& out5, __m512d& out6, __m512d& out7) {
-    // Połączenie par wierszy w bloki niskich i wysokich elementów
     __m512d t0 = _mm512_unpacklo_pd(row0, row1); // [row0[0], row1[0], row0[2], row1[2], row0[4], row1[4], row0[6], row1[6]]
     __m512d t1 = _mm512_unpackhi_pd(row0, row1); // [row0[1], row1[1], row0[3], row1[3], row0[5], row1[5], row0[7], row1[7]]
     __m512d t2 = _mm512_unpacklo_pd(row2, row3);

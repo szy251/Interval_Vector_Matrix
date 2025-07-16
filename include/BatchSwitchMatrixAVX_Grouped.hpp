@@ -2,7 +2,8 @@
 #define MATRIX_BATCH_AVX_GRP_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.hpp>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
 #include <MatrixBasic.hpp>
@@ -33,11 +34,12 @@ class BatchSwitchMatrixAVX_Grouped
 private:
     __m256d* lower = nullptr;
     __m256d* upper = nullptr;
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     static constexpr size_t vectors_count_row = (M+3)/4;
     static constexpr size_t vectors_count = vectors_count_row*N;
     static constexpr size_t full_vectors = M/4;
     static constexpr size_t rest = M % 4;
+    static constexpr bool enable_parallel = (N>=100) &&  (M>=100);
 
     template<size_t N1,size_t M1>
     friend class BatchSwitchMatrixAVX_Grouped;
@@ -123,21 +125,44 @@ private:
             }
             }
             lower[index.ind] = vec_lower;
-            upper[index.ind+1] = vec_upper;
+            upper[index.ind] = vec_upper;
         }
     };
 public:
+    static constexpr size_t rows = N;
+    static constexpr size_t cols = M;
     BatchSwitchMatrixAVX_Grouped(){
-        lower = new alignas(32) __m256d[vectors_count]();
-        upper = new alignas(32) __m256d[vectors_count]();
+        if constexpr (enable_parallel){
+            lower = new alignas(32) __m256d[vectors_count];
+            upper = new alignas(32) __m256d[vectors_count];
+            #pragma omp parallel for
+            for(size_t i = 0; i < vectors_count; i++){
+                lower[i] = _mm256_setzero_pd();
+                upper[i] = _mm256_setzero_pd();
+            }
+        }
+        else{
+            lower = new alignas(32) __m256d[vectors_count]();
+            upper = new alignas(32) __m256d[vectors_count]();
+        }
     }
 
     BatchSwitchMatrixAVX_Grouped(const BatchSwitchMatrixAVX_Grouped& cpy){
         lower = new alignas(32) __m256d[vectors_count];
         upper = new alignas(32) __m256d[vectors_count];
-        for(size_t i = 0; i < vectors_count; i++) {
-            lower[i] = cpy.lower[i];
-            upper[i] = cpy.upper[i];
+        
+        if constexpr (enable_parallel){
+            #pragma omp parallel for
+            for(size_t i = 0; i < vectors_count; i++){
+                lower[i] = cpy.lower[i];
+                upper[i] = cpy.upper[i];
+            }
+        }
+        else{
+            for(size_t i = 0; i < vectors_count; i++) {
+                lower[i] = cpy.lower[i];
+                upper[i] = cpy.upper[i];
+            }
         }
     }
 
@@ -152,40 +177,75 @@ public:
         lower = new alignas(32) __m256d[vectors_count];
         upper = new alignas(32) __m256d[vectors_count];
 
-
-        for (size_t row = 0; row < N; ++row) {
-            size_t offset = row * M * 2; // Przesunięcie w tablicy 1D reprezentującej macierz
-            
-            // Wczytaj pełne wektory (4-elementowe grupy)
-            for (size_t i = 0; i < full_vectors * 8; i += 8) {
-                __m256d a = _mm256_set_pd(
-                    array[offset + i + 6],
-                    array[offset + i + 4],
-                    array[offset + i + 2],
-                    array[offset + i + 0]
-                );
-                __m256d b = _mm256_set_pd(
-                    array[offset + i + 7],
-                    array[offset + i + 5],
-                    array[offset + i + 3],
-                    array[offset + i + 1]
-                );
-                size_t vector_index = row * vectors_count_row + i / 8;
-                lower[vector_index] = a;
-                upper[vector_index] = b;
-            }
-
-            // Obsłuż resztę (jeśli istnieje)
-            if (rest > 0) {
-                double temp_lower[4] = {};
-                double temp_upper[4] = {};
-                for (size_t i = 0; i < rest; ++i) {
-                    temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
-                    temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+        if constexpr (enable_parallel){
+            #pragma omp parallel for
+            for (size_t row = 0; row < N; ++row) {
+                size_t offset = row * M * 2; 
+                
+                for (size_t i = 0; i < full_vectors * 8; i += 8) {
+                    __m256d a = _mm256_set_pd(
+                        array[offset + i + 6],
+                        array[offset + i + 4],
+                        array[offset + i + 2],
+                        array[offset + i + 0]
+                    );
+                    __m256d b = _mm256_set_pd(
+                        array[offset + i + 7],
+                        array[offset + i + 5],
+                        array[offset + i + 3],
+                        array[offset + i + 1]
+                    );
+                    size_t vector_index = row * vectors_count_row + i / 8;
+                    lower[vector_index] = a;
+                    upper[vector_index] = b;
                 }
-                size_t vector_index = row * vectors_count_row + full_vectors;
-                lower[vector_index] = _mm256_load_pd(temp_lower);
-                upper[vector_index] = _mm256_load_pd(temp_upper);
+
+                if (rest > 0) {
+                    double temp_lower[4] = {};
+                    double temp_upper[4] = {};
+                    for (size_t i = 0; i < rest; ++i) {
+                        temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
+                        temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+                    }
+                    size_t vector_index = row * vectors_count_row + full_vectors;
+                    lower[vector_index] = _mm256_load_pd(temp_lower);
+                    upper[vector_index] = _mm256_load_pd(temp_upper);
+                }
+            }
+        }
+        else{
+            for (size_t row = 0; row < N; ++row) {
+                size_t offset = row * M * 2; 
+                
+                for (size_t i = 0; i < full_vectors * 8; i += 8) {
+                    __m256d a = _mm256_set_pd(
+                        array[offset + i + 6],
+                        array[offset + i + 4],
+                        array[offset + i + 2],
+                        array[offset + i + 0]
+                    );
+                    __m256d b = _mm256_set_pd(
+                        array[offset + i + 7],
+                        array[offset + i + 5],
+                        array[offset + i + 3],
+                        array[offset + i + 1]
+                    );
+                    size_t vector_index = row * vectors_count_row + i / 8;
+                    lower[vector_index] = a;
+                    upper[vector_index] = b;
+                }
+
+                if (rest > 0) {
+                    double temp_lower[4] = {};
+                    double temp_upper[4] = {};
+                    for (size_t i = 0; i < rest; ++i) {
+                        temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
+                        temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+                    }
+                    size_t vector_index = row * vectors_count_row + full_vectors;
+                    lower[vector_index] = _mm256_load_pd(temp_lower);
+                    upper[vector_index] = _mm256_load_pd(temp_upper);
+                }
             }
         }
     }
@@ -197,57 +257,105 @@ public:
         lower = new alignas(32) __m256d[vectors_count];
         upper = new alignas(32) __m256d[vectors_count];
 
-        for (size_t row = 0; row < N; ++row) {
-            size_t offset = row * M * 2; // Przesunięcie w tablicy 1D reprezentującej macierz
-            
-            // Wczytaj pełne wektory (4-elementowe grupy)
-            for (size_t i = 0; i < full_vectors * 8; i += 8) {
-                __m256d a = _mm256_set_pd(
-                    array[offset + i + 6],
-                    array[offset + i + 4],
-                    array[offset + i + 2],
-                    array[offset + i + 0]
-                );
-                __m256d b = _mm256_set_pd(
-                    array[offset + i + 7],
-                    array[offset + i + 5],
-                    array[offset + i + 3],
-                    array[offset + i + 1]
-                );
-                size_t vector_index = row * vectors_count_row + i / 8;
-                lower[vector_index] = a;
-                upper[vector_index] = b;
-            }
-
-            // Obsłuż resztę (jeśli istnieje)
-            if (rest > 0) {
-                double temp_lower[4] = {};
-                double temp_upper[4] = {};
-                for (size_t i = 0; i < rest; ++i) {
-                    temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
-                    temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+        if constexpr (enable_parallel){
+            #pragma omp parallel for
+            for (size_t row = 0; row < N; ++row) {
+                size_t offset = row * M * 2; 
+                
+                for (size_t i = 0; i < full_vectors * 8; i += 8) {
+                    __m256d a = _mm256_set_pd(
+                        array[offset + i + 6],
+                        array[offset + i + 4],
+                        array[offset + i + 2],
+                        array[offset + i + 0]
+                    );
+                    __m256d b = _mm256_set_pd(
+                        array[offset + i + 7],
+                        array[offset + i + 5],
+                        array[offset + i + 3],
+                        array[offset + i + 1]
+                    );
+                    size_t vector_index = row * vectors_count_row + i / 8;
+                    lower[vector_index] = a;
+                    upper[vector_index] = b;
                 }
-                size_t vector_index = row * vectors_count_row + full_vectors;
-                lower[vector_index] = _mm256_load_pd(temp_lower);
-                upper[vector_index] = _mm256_load_pd(temp_upper);
+
+                if (rest > 0) {
+                    double temp_lower[4] = {};
+                    double temp_upper[4] = {};
+                    for (size_t i = 0; i < rest; ++i) {
+                        temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
+                        temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+                    }
+                    size_t vector_index = row * vectors_count_row + full_vectors;
+                    lower[vector_index] = _mm256_load_pd(temp_lower);
+                    upper[vector_index] = _mm256_load_pd(temp_upper);
+                }
+            }
+        }
+        else{
+            for (size_t row = 0; row < N; ++row) {
+                size_t offset = row * M * 2; 
+                
+                for (size_t i = 0; i < full_vectors * 8; i += 8) {
+                    __m256d a = _mm256_set_pd(
+                        array[offset + i + 6],
+                        array[offset + i + 4],
+                        array[offset + i + 2],
+                        array[offset + i + 0]
+                    );
+                    __m256d b = _mm256_set_pd(
+                        array[offset + i + 7],
+                        array[offset + i + 5],
+                        array[offset + i + 3],
+                        array[offset + i + 1]
+                    );
+                    size_t vector_index = row * vectors_count_row + i / 8;
+                    lower[vector_index] = a;
+                    upper[vector_index] = b;
+                }
+
+                if (rest > 0) {
+                    double temp_lower[4] = {};
+                    double temp_upper[4] = {};
+                    for (size_t i = 0; i < rest; ++i) {
+                        temp_lower[i] = array[offset + 2 * M - 2 * rest + 2 * i];
+                        temp_upper[i] = array[offset + 2 * M - 2 * rest + 2 * i + 1];
+                    }
+                    size_t vector_index = row * vectors_count_row + full_vectors;
+                    lower[vector_index] = _mm256_load_pd(temp_lower);
+                    upper[vector_index] = _mm256_load_pd(temp_upper);
+                }
             }
         }
     }
 
     BatchSwitchMatrixAVX_Grouped& operator=(const BatchSwitchMatrixAVX_Grouped& fst) {
         if (this != &fst) {
-            delete[] lower;
-            delete[] upper;
-            if (fst.lower) {
-                lower = new alignas(32) __m256d[vectors_count];
-                upper = new alignas(32) __m256d[vectors_count];
-                for (size_t i = 0; i < vectors_count; ++i) {
-                    lower[i] = fst.lower[i];
-                    upper[i] = fst.upper[i];
-                }
-            } else {
+            if (!fst.lower) {
+                delete[] lower;
                 lower = nullptr;
+                delete[] upper;
                 upper = nullptr;
+            } else {
+                if (!lower) {
+                    lower = new alignas(32) __m256d[vectors_count];
+                    upper = new alignas(32) __m256d[vectors_count];
+                }
+                
+                if constexpr (enable_parallel) {
+                    #pragma omp parallel for
+                    for (size_t i = 0; i < vectors_count; ++i) {
+                        lower[i] = fst.lower[i];
+                        upper[i] = fst.upper[i];
+                    }
+                }
+                else {
+                    for (size_t i = 0; i < vectors_count; ++i) {
+                        lower[i] = fst.lower[i];
+                        upper[i] = fst.upper[i];
+                    } 
+                }
             }
         }
         return *this;
@@ -270,36 +378,79 @@ public:
 
     friend BatchSwitchMatrixAVX_Grouped operator+(const BatchSwitchMatrixAVX_Grouped& fst, const BatchSwitchMatrixAVX_Grouped& scd){
         BatchSwitchMatrixAVX_Grouped result(true);
-        capd::rounding::DoubleRounding::roundDown();
+        if constexpr(enable_parallel)
+        {
+            #pragma omp parallel
+            { 
+                capd::rounding::DoubleRounding::roundDown();
+                #pragma omp for schedule(static) nowait
+                for(size_t i = 0; i < result.vectors_count; i++) {
+                    result.lower[i] = _mm256_add_pd(fst.lower[i], scd.lower[i]);
+                }
 
-        for(size_t i = 0; i < result.vectors_count; i++) {
-            result.lower[i] = _mm256_add_pd(fst.lower[i], scd.lower[i]);
+                capd::rounding::DoubleRounding::roundUp();
+                #pragma omp for schedule(static)
+                for(size_t i = 0; i < result.vectors_count; i++) {
+                    result.upper[i] = _mm256_add_pd(fst.upper[i], scd.upper[i]);
+                }
+            }
         }
+        else
+        {
+            capd::rounding::DoubleRounding::roundDown();
 
-        capd::rounding::DoubleRounding::roundUp();
-         for(size_t i = 0; i < result.vectors_count; i++) {
-            result.upper[i] = _mm256_add_pd(fst.upper[i], scd.upper[i]);
+            for(size_t i = 0; i < result.vectors_count; i++) {
+                result.lower[i] = _mm256_add_pd(fst.lower[i], scd.lower[i]);
+            }
+    
+            capd::rounding::DoubleRounding::roundUp();
+             for(size_t i = 0; i < result.vectors_count; i++) {
+                result.upper[i] = _mm256_add_pd(fst.upper[i], scd.upper[i]);
+            }
         }
+        
 
         return result;
     }
 
     friend BatchSwitchMatrixAVX_Grouped operator-(const BatchSwitchMatrixAVX_Grouped& fst, const BatchSwitchMatrixAVX_Grouped& scd){
         BatchSwitchMatrixAVX_Grouped result(true);
-        capd::rounding::DoubleRounding::roundDown();
+        if constexpr(enable_parallel)
+        {
+            #pragma omp parallel
+            { 
+                capd::rounding::DoubleRounding::roundDown();
+                #pragma omp for schedule(static) nowait
+                for(size_t i = 0; i < result.vectors_count; i++) {
+                    result.lower[i] = _mm256_sub_pd(fst.lower[i], scd.lower[i]);
+                }
 
-        for(size_t i = 0; i < result.vectors_count; i++) {
-            result.lower[i] = _mm256_sub_pd(fst.lower[i], scd.upper[i]);
+                capd::rounding::DoubleRounding::roundUp();
+                #pragma omp for schedule(static)
+                for(size_t i = 0; i < result.vectors_count; i++) {
+                    result.upper[i] = _mm256_sub_pd(fst.upper[i], scd.upper[i]);
+                }
+            }
         }
+        else
+        {
+            capd::rounding::DoubleRounding::roundDown();
 
-
-
-        capd::rounding::DoubleRounding::roundUp();
-        for(size_t i = 0; i < result.vectors_count; i++) {
-            result.upper[i] = _mm256_sub_pd(fst.upper[i], scd.lower[i]);
+            for(size_t i = 0; i < result.vectors_count; i++) {
+                result.lower[i] = _mm256_sub_pd(fst.lower[i], scd.lower[i]);
+            }
+    
+            capd::rounding::DoubleRounding::roundUp();
+             for(size_t i = 0; i < result.vectors_count; i++) {
+                result.upper[i] = _mm256_sub_pd(fst.upper[i], scd.upper[i]);
+            }
         }
         return result;
     }
+
+
+    //mnożenie z rerganizacją danych
+
 
     // template <size_t P>
     // BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
@@ -375,26 +526,107 @@ public:
     //     return result;
     // }
 
+
+    //standard 
+
     template <size_t P>
-BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
-    BatchSwitchMatrixAVX_Grouped<N, P> result{};
+    BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<M, P>& fst) {
+        BatchSwitchMatrixAVX_Grouped<N, P> result{};
 
-    // Warunek aktywacji równoległości (możesz dostosować próg 30)
-    static constexpr bool enable_parallel = (N >= 24) && (M >= 24) && (P >=24);
+        // Warunek aktywacji równoległości 
+        static constexpr bool enable_parallel_mlt = (N >= 30) && (M >= 30) && (P >=30);
 
-    // Blok równoległy zależny od constexpr
-    if constexpr(enable_parallel){
-        #pragma omp parallel
-        {
-            capd::rounding::DoubleRounding::roundDown();
 
-            // Pętla zewnętrzna - równoległa tylko dla dużych macierzy
-            #pragma omp for
-            for (size_t i = 0; i < N; ++i) {
-                alignas(32) __m256d lows[4];
-                alignas(32) __m256d upps[4];
+        if constexpr(enable_parallel_mlt){
+            #pragma omp parallel
+            {
+                capd::rounding::DoubleRounding::roundDown();
+
+                #pragma omp for schedule(static) nowait
+                for (size_t i = 0; i < N; ++i) {
+                    alignas(32) __m256d lows[4];
+                    alignas(32) __m256d upps[4];
+                    
+                    // Główna część - pełne wektory
+                    for (size_t k = 0; k < full_vectors; ++k) {
+                        __m256d low = lower[i*vectors_count_row + k];
+                        __m256d up = upper[i*vectors_count_row + k];
+                        details::split_m256d_to_vectors(low, lows);
+                        details::split_m256d_to_vectors(up, upps);
+                        
+                        for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                            __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                            details::add_min(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
+                            details::add_min(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
+                            details::add_min(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
+                            details::add_min(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
+                        }
+                    }
+                    
+                    // Reszta (0-3 elementy)
+                    if constexpr (rest > 0) {
+                        __m256d low = lower[i*vectors_count_row + full_vectors];
+                        __m256d up = upper[i*vectors_count_row + full_vectors];
+                        details::split_m256d_to_vectors(low, lows);
+                        details::split_m256d_to_vectors(up, upps);
+                        
+                        for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                            __m256d& wyn = result.lower[i * result.vectors_count_row + j];
+                            if constexpr (rest >= 1) details::add_min(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
+                            if constexpr (rest >= 2) details::add_min(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
+                            if constexpr (rest >= 3) details::add_min(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
+                        }
+                    }
+                }
+
+                //#pragma omp barrier
+
+                capd::rounding::DoubleRounding::roundUp();
                 
-                // Główna część - pełne wektory
+                #pragma omp for schedule(static)
+                for (size_t i = 0; i < N; ++i) {
+                    alignas(32) __m256d lows[4];
+                    alignas(32) __m256d upps[4];
+                    
+                    for (size_t k = 0; k < full_vectors; ++k) {
+                        __m256d low = lower[i*vectors_count_row + k];
+                        __m256d up = upper[i*vectors_count_row + k];
+                        details::split_m256d_to_vectors(low, lows);
+                        details::split_m256d_to_vectors(up, upps);
+                        
+                        for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                            __m256d& wyn = result.upper[i * result.vectors_count_row + j];
+                            details::add_max(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
+                            details::add_max(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
+                            details::add_max(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
+                            details::add_max(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
+                        }
+                    }
+                    
+                    if constexpr (rest > 0) {
+                        __m256d low = lower[i*vectors_count_row + full_vectors];
+                        __m256d up = upper[i*vectors_count_row + full_vectors];
+                        details::split_m256d_to_vectors(low, lows);
+                        details::split_m256d_to_vectors(up, upps);
+                        
+                        for (size_t j = 0; j < result.vectors_count_row; ++j) {
+                            __m256d& wyn = result.upper[i * result.vectors_count_row + j];
+                            if constexpr (rest >= 1) details::add_max(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
+                            if constexpr (rest >= 2) details::add_max(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
+                            if constexpr (rest >= 3) details::add_max(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
+                        }
+                    }
+                }
+            }
+        }
+        else{
+            
+
+            capd::rounding::DoubleRounding::roundDown();
+            alignas(32) __m256d lows[4];
+            alignas(32) __m256d upps[4];
+            for (size_t i = 0; i < N; ++i) {
+                
                 for (size_t k = 0; k < full_vectors; ++k) {
                     __m256d low = lower[i*vectors_count_row + k];
                     __m256d up = upper[i*vectors_count_row + k];
@@ -426,15 +658,10 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
                 }
             }
 
-            #pragma omp barrier
 
-            // Część z zaokrąglaniem w górę
             capd::rounding::DoubleRounding::roundUp();
             
-            #pragma omp for
             for (size_t i = 0; i < N; ++i) {
-                alignas(32) __m256d lows[4];
-                alignas(32) __m256d upps[4];
                 
                 for (size_t k = 0; k < full_vectors; ++k) {
                     __m256d low = lower[i*vectors_count_row + k];
@@ -466,84 +693,8 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
                 }
             }
         }
+        return result;
     }
-    else{
-        // Część z zaokrąglaniem w dół
-        capd::rounding::DoubleRounding::roundDown();
-        alignas(32) __m256d lows[4];
-        alignas(32) __m256d upps[4];
-        for (size_t i = 0; i < N; ++i) {
-            
-            // Główna część - pełne wektory
-            for (size_t k = 0; k < full_vectors; ++k) {
-                __m256d low = lower[i*vectors_count_row + k];
-                __m256d up = upper[i*vectors_count_row + k];
-                details::split_m256d_to_vectors(low, lows);
-                details::split_m256d_to_vectors(up, upps);
-                
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    details::add_min(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
-                    details::add_min(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
-                    details::add_min(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
-                    details::add_min(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
-                }
-            }
-            
-            // Reszta (0-3 elementy)
-            if constexpr (rest > 0) {
-                __m256d low = lower[i*vectors_count_row + full_vectors];
-                __m256d up = upper[i*vectors_count_row + full_vectors];
-                details::split_m256d_to_vectors(low, lows);
-                details::split_m256d_to_vectors(up, upps);
-                
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.lower[i * result.vectors_count_row + j];
-                    if constexpr (rest >= 1) details::add_min(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
-                    if constexpr (rest >= 2) details::add_min(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
-                    if constexpr (rest >= 3) details::add_min(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
-                }
-            }
-        }
-
-
-        // Część z zaokrąglaniem w górę
-        capd::rounding::DoubleRounding::roundUp();
-        
-        for (size_t i = 0; i < N; ++i) {
-            
-            for (size_t k = 0; k < full_vectors; ++k) {
-                __m256d low = lower[i*vectors_count_row + k];
-                __m256d up = upper[i*vectors_count_row + k];
-                details::split_m256d_to_vectors(low, lows);
-                details::split_m256d_to_vectors(up, upps);
-                
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.upper[i * result.vectors_count_row + j];
-                    details::add_max(lows[0], upps[0], fst.lower[(k*4 + 0) * result.vectors_count_row + j], fst.upper[(k*4 + 0) * result.vectors_count_row + j], wyn);
-                    details::add_max(lows[1], upps[1], fst.lower[(k*4 + 1) * result.vectors_count_row + j], fst.upper[(k*4 + 1) * result.vectors_count_row + j], wyn);
-                    details::add_max(lows[2], upps[2], fst.lower[(k*4 + 2) * result.vectors_count_row + j], fst.upper[(k*4 + 2) * result.vectors_count_row + j], wyn);
-                    details::add_max(lows[3], upps[3], fst.lower[(k*4 + 3) * result.vectors_count_row + j], fst.upper[(k*4 + 3) * result.vectors_count_row + j], wyn);
-                }
-            }
-            
-            if constexpr (rest > 0) {
-                __m256d low = lower[i*vectors_count_row + full_vectors];
-                __m256d up = upper[i*vectors_count_row + full_vectors];
-                details::split_m256d_to_vectors(low, lows);
-                details::split_m256d_to_vectors(up, upps);
-                
-                for (size_t j = 0; j < result.vectors_count_row; ++j) {
-                    __m256d& wyn = result.upper[i * result.vectors_count_row + j];
-                    if constexpr (rest >= 1) details::add_max(lows[0], upps[0], fst.lower[(full_vectors*4 + 0) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 0) * result.vectors_count_row + j], wyn);
-                    if constexpr (rest >= 2) details::add_max(lows[1], upps[1], fst.lower[(full_vectors*4 + 1) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 1) * result.vectors_count_row + j], wyn);
-                    if constexpr (rest >= 3) details::add_max(lows[2], upps[2], fst.lower[(full_vectors*4 + 2) * result.vectors_count_row + j], fst.upper[(full_vectors*4 + 2) * result.vectors_count_row + j], wyn);
-                }
-            }
-        }
-    }
-    return result;
-}
     BatchSwitchMatrixAVX_Grouped & operator+=(const BatchSwitchMatrixAVX_Grouped& fst){
         *this = *this+fst;
         return *this;
@@ -556,74 +707,373 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
     friend BatchSwitchMatrixAVX_Grouped operator+(const BatchSwitchMatrixAVX_Grouped &fst, const Interval & scd){
         BatchSwitchMatrixAVX_Grouped result(true);
         __m256d scalar = _mm256_set1_pd(scd.leftBound());
-        capd::rounding::DoubleRounding::roundDown();
-        for(size_t i = 0; i<result.vectors_count;i++){
-            result.lower[i] = _mm256_add_pd(fst.lower[i],scalar);
+        __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+        if constexpr (enable_parallel)
+        {
+            #pragma omp parallel
+            {
+                capd::rounding::DoubleRounding::roundDown();
+                #pragma omp for schedule(static) nowait
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.lower[i] = _mm256_add_pd(fst.lower[i],scalar);
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                #pragma omp for schedule(static)
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.upper[i] = _mm256_add_pd(fst.upper[i],scalar2);
+                }
+            }
         }
-        scalar = _mm256_set1_pd(scd.rightBound());
-        capd::rounding::DoubleRounding::roundUp();
-         for(size_t i = 0; i<result.vectors_count;i++){
-            result.upper[i] = _mm256_add_pd(fst.upper[i],scalar);
+        else
+        {
+            capd::rounding::DoubleRounding::roundDown();
+            for(size_t i = 0; i<result.vectors_count;i++){
+                result.lower[i] = _mm256_add_pd(fst.lower[i],scalar);
+            }
+            capd::rounding::DoubleRounding::roundUp();
+            for(size_t i = 0; i<result.vectors_count;i++){
+                result.upper[i] = _mm256_add_pd(fst.upper[i],scalar2);
+            }
         }
         return result;
     }
     friend BatchSwitchMatrixAVX_Grouped operator-(const BatchSwitchMatrixAVX_Grouped &fst, const Interval & scd){
         BatchSwitchMatrixAVX_Grouped result(true);
         __m256d scalar = _mm256_set1_pd(scd.rightBound());
-        capd::rounding::DoubleRounding::roundDown();
-        for(size_t i = 0; i<result.vectors_count;i++){
-            result.lower[i] = _mm256_sub_pd(fst.lower[i],scalar);
+        __m256d scalar2 = _mm256_set1_pd(scd.leftBound());
+        if constexpr (enable_parallel)
+        {
+            #pragma omp parallel
+            {
+                capd::rounding::DoubleRounding::roundDown();
+                #pragma omp for schedule(static) nowait
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.lower[i] = _mm256_sub_pd(fst.lower[i],scalar);
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                #pragma omp for schedule(static)
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.upper[i] = _mm256_sub_pd(fst.upper[i],scalar2);
+                }
+            }
         }
-        scalar = _mm256_set1_pd(scd.leftBound());
-        capd::rounding::DoubleRounding::roundUp();
-         for(size_t i = 0; i<result.vectors_count;i++){
-            result.upper[i] = _mm256_sub_pd(fst.upper[i],scalar);
+        else
+        {
+            capd::rounding::DoubleRounding::roundDown();
+            for(size_t i = 0; i<result.vectors_count;i++){
+                result.lower[i] = _mm256_sub_pd(fst.lower[i],scalar);
+            }
+            capd::rounding::DoubleRounding::roundUp();
+            for(size_t i = 0; i<result.vectors_count;i++){
+                result.upper[i] = _mm256_sub_pd(fst.upper[i],scalar2);
+            }
         }
         return result;
     }
     friend BatchSwitchMatrixAVX_Grouped operator*(const BatchSwitchMatrixAVX_Grouped &fst, const Interval & scd){
         char type_scalar = type(scd.leftBound(),scd.rightBound());
-        switch(type_scalar)
+        if constexpr(enable_parallel)
         {
-            case 0:
-                return BatchSwitchMatrixAVX_Grouped ();
-            case 1:{
-                __m256d scalar = _mm256_set1_pd(scd.leftBound());
-                BatchSwitchMatrixAVX_Grouped result(true);
-                capd::rounding::DoubleRounding::roundDown();
-                 for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_mul_pd(fst.lower[i],scalar);
+            switch(type_scalar)
+            {
+                case 0:
+                    return BatchSwitchMatrixAVX_Grouped ();
+                case 1:{
+                    __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    #pragma omp parallel
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_mul_pd(fst.lower[i],scalar);
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.upper[i] = _mm256_mul_pd(fst.upper[i],scalar);
+                        }
+                    }
+                    return result;
                 }
-                capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.upper[i] = _mm256_mul_pd(fst.upper[i],scalar);
+                case 2:{
+                    __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    #pragma omp parallel
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_mul_pd(fst.upper[i],scalar);
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_mul_pd(fst.lower[i],scalar);
+                        }
+                    }
+                    return result;
+                }
+                case 3:{
+                    __m256d scalar = _mm256_set1_pd(scd.rightBound());
+                    __m256d zero = _mm256_setzero_pd();
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    #pragma omp parallel
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.lower[i],scalar),zero);
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.upper[i],scalar),zero);
+                        }
+                    }
+                    return result;
+                }
+                case 4:{
+                    __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                    __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    #pragma omp parallel
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                        }
+                    }
+                    return result;
+                }
+                case 5:{
+                    __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                    __m256d zero = _mm256_setzero_pd();
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+
+                    #pragma omp parallel
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar),zero);
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar),zero);
+                        }
+                    }
+                    return result;
+                }
+                case 6:{
+                    __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                    __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    #pragma omp parallel 
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                        }
+                    }
+                    return result;
+                }
+                case 7:{
+                    __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                    __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    #pragma omp parallel
+                    {
+                        capd::rounding::DoubleRounding::roundDown();
+                        #pragma omp for schedule(static) nowait
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                        }
+                        capd::rounding::DoubleRounding::roundUp();
+                        #pragma omp for schedule(static)
+                        for(size_t i = 0; i<result.vectors_count;i++){
+                            result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                        }
+                    }
+                    return result;
+                }
+            }
+        }
+        else
+        {
+            switch(type_scalar)
+            {
+                case 0:
+                    return BatchSwitchMatrixAVX_Grouped ();
+                case 1:{
+                    __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_mul_pd(fst.lower[i],scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_mul_pd(fst.upper[i],scalar);
+                    }
+                    return result;
+                }
+                case 2:{
+                    __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_mul_pd(fst.upper[i],scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                    result.upper[i] = _mm256_mul_pd(fst.lower[i],scalar);
+                    }
+                    return result;
+                }
+                case 3:{
+                    __m256d scalar = _mm256_set1_pd(scd.rightBound());
+                    __m256d zero = _mm256_setzero_pd();
+                    BatchSwitchMatrixAVX_Grouped result(true);
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.lower[i],scalar),zero);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.upper[i],scalar),zero);
+                    }
+                    return result;
+                }
+                case 4:{
+                    __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                    __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                    }
+                    return result;
+                }
+                case 5:{
+                    __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                    __m256d zero = _mm256_setzero_pd();
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar),zero);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar),zero);
+                    }
+                    return result;
+                }
+                case 6:{
+                    __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                    __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                    }
+                    return result;
+                }
+                case 7:{
+                    __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                    __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+
+                    BatchSwitchMatrixAVX_Grouped result(true);
+
+                    capd::rounding::DoubleRounding::roundDown();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                    }
+                    return result;
+                }
+            }
+        }
+        return BatchSwitchMatrixAVX_Grouped ();
+    }
+    friend BatchSwitchMatrixAVX_Grouped operator/(const BatchSwitchMatrixAVX_Grouped &fst, const Interval & scd){
+        char type_scalar = type(scd.leftBound(),scd.rightBound());
+        if constexpr(enable_parallel)
+        {
+            switch (type_scalar)
+            {
+            case 0:
+            case 3:
+            case 5:
+            case 7:
+                throw std::invalid_argument("Scalar has 0 in it");
+            case 1:{
+                BatchSwitchMatrixAVX_Grouped result(true);
+                __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_div_pd(fst.lower[i],scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_div_pd(fst.upper[i],scalar);
+                    }
                 }
                 return result;
             }
             case 2:{
                 __m256d scalar = _mm256_set1_pd(scd.leftBound());
                 BatchSwitchMatrixAVX_Grouped result(true);
-                capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_mul_pd(fst.upper[i],scalar);
-                }
-                capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm256_mul_pd(fst.lower[i],scalar);
-                }
-                return result;
-            }
-            case 3:{
-                __m256d scalar = _mm256_set1_pd(scd.rightBound());
-                __m256d zero = _mm256_setzero_pd();
-                BatchSwitchMatrixAVX_Grouped result(true);
-                capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.lower[i],scalar),zero);
-                }
-                capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.upper[i],scalar),zero);
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_div_pd(fst.upper[i],scalar);
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_div_pd(fst.lower[i],scalar);
+                    }
                 }
                 return result;
             }
@@ -633,29 +1083,18 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
 
                 BatchSwitchMatrixAVX_Grouped result(true);
 
-                capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
-                }
-                capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
-                }
-                return result;
-            }
-            case 5:{
-                __m256d scalar = _mm256_set1_pd(scd.leftBound());
-                __m256d zero = _mm256_setzero_pd();
-
-                BatchSwitchMatrixAVX_Grouped result(true);
-
-                capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar),zero);
-                }
-                capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                     result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar),zero);
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_div_pd(fst.lower[i],scalar1),_mm256_div_pd(fst.lower[i],scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_max_pd(_mm256_div_pd(fst.upper[i],scalar1),_mm256_div_pd(fst.upper[i],scalar2));
+                    }
                 }
                 return result;
             }
@@ -665,100 +1104,89 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
 
                 BatchSwitchMatrixAVX_Grouped result(true);
 
-                capd::rounding::DoubleRounding::roundDown();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
-                }
-                capd::rounding::DoubleRounding::roundUp();
-                for(size_t i = 0; i<result.vectors_count;i++){
-                    result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                #pragma omp parallel 
+                {
+                    capd::rounding::DoubleRounding::roundDown();
+                    #pragma omp for schedule(static) nowait
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.lower[i] = _mm256_min_pd(_mm256_div_pd(fst.upper[i],scalar1),_mm256_div_pd(fst.upper[i],scalar2));
+                    }
+                    capd::rounding::DoubleRounding::roundUp();
+                    #pragma omp for schedule(static)
+                    for(size_t i = 0; i<result.vectors_count;i++){
+                        result.upper[i] = _mm256_min_pd(_mm256_div_pd(fst.lower[i],scalar1),_mm256_div_pd(fst.lower[i],scalar2));
+                    }
                 }
                 return result;
             }
-            case 7:{
+            }
+        }
+        else
+        {
+            switch (type_scalar)
+            {
+            case 0:
+            case 3:
+            case 5:
+            case 7:
+                throw std::invalid_argument("Scalar has 0 in it");
+            case 1:{
+                __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.lower[i] = _mm256_div_pd(fst.lower[i],scalar);
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.upper[i] = _mm256_div_pd(fst.upper[i],scalar);
+                }
+                return result;
+            }
+            case 2:{
+                __m256d scalar = _mm256_set1_pd(scd.leftBound());
+                BatchSwitchMatrixAVX_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.lower[i] = _mm256_div_pd(fst.upper[i],scalar);
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.upper[i] = _mm256_div_pd(fst.lower[i],scalar);
+                }
+                return result;
+            }
+            case 4:{
                 __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
                 __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
 
                 BatchSwitchMatrixAVX_Grouped result(true);
-
                 capd::rounding::DoubleRounding::roundDown();
                 for(size_t i = 0; i<result.vectors_count;i++){
-                    result.lower[i] = _mm256_min_pd(_mm256_mul_pd(fst.upper[i],scalar1),_mm256_mul_pd(fst.lower[i],scalar2));
+                    result.lower[i] = _mm256_min_pd(_mm256_div_pd(fst.lower[i],scalar1),_mm256_div_pd(fst.lower[i],scalar2));
                 }
                 capd::rounding::DoubleRounding::roundUp();
                 for(size_t i = 0; i<result.vectors_count;i++){
-                    result.upper[i] = _mm256_max_pd(_mm256_mul_pd(fst.lower[i],scalar1),_mm256_mul_pd(fst.upper[i],scalar2));
+                    result.upper[i] = _mm256_max_pd(_mm256_div_pd(fst.upper[i],scalar1),_mm256_div_pd(fst.upper[i],scalar2));
                 }
                 return result;
             }
-        }
-        return BatchSwitchMatrixAVX_Grouped ();
-    }
-    friend BatchSwitchMatrixAVX_Grouped operator/(const BatchSwitchMatrixAVX_Grouped &fst, const Interval & scd){
-        char type_scalar = type(scd.leftBound(),scd.rightBound());
-        switch (type_scalar)
-        {
-        case 0:
-        case 3:
-        case 5:
-        case 7:
-            throw std::invalid_argument("Scalar has 0 in it");
-        case 1:{
-            __m256d scalar = _mm256_set1_pd(scd.leftBound());
-            BatchSwitchMatrixAVX_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm256_div_pd(fst.lower[i],scalar);
-            }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm256_div_pd(fst.upper[i],scalar);
-            }
-            return result;
-        }
-        case 2:{
-            __m256d scalar = _mm256_set1_pd(scd.leftBound());
-            BatchSwitchMatrixAVX_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm256_div_pd(fst.upper[i],scalar);
-            }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm256_div_pd(fst.lower[i],scalar);
-            }
-            return result;
-        }
-        case 4:{
-            __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
-            __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
+            case 6:{
+                __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
+                __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
 
-            BatchSwitchMatrixAVX_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm256_min_pd(_mm256_div_pd(fst.lower[i],scalar1),_mm256_div_pd(fst.lower[i],scalar2));
+                BatchSwitchMatrixAVX_Grouped result(true);
+                capd::rounding::DoubleRounding::roundDown();
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.lower[i] = _mm256_min_pd(_mm256_div_pd(fst.upper[i],scalar1),_mm256_div_pd(fst.upper[i],scalar2));
+                }
+                capd::rounding::DoubleRounding::roundUp();
+                for(size_t i = 0; i<result.vectors_count;i++){
+                    result.upper[i] = _mm256_min_pd(_mm256_div_pd(fst.lower[i],scalar1),_mm256_div_pd(fst.lower[i],scalar2));
+                }
+                return result;
             }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm256_max_pd(_mm256_div_pd(fst.upper[i],scalar1),_mm256_div_pd(fst.upper[i],scalar2));
             }
-            return result;
-        }
-        case 6:{
-            __m256d scalar1 = _mm256_set1_pd(scd.leftBound());
-            __m256d scalar2 = _mm256_set1_pd(scd.rightBound());
-
-            BatchSwitchMatrixAVX_Grouped result(true);
-            capd::rounding::DoubleRounding::roundDown();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.lower[i] = _mm256_min_pd(_mm256_div_pd(fst.upper[i],scalar1),_mm256_div_pd(fst.upper[i],scalar2));
-            }
-            capd::rounding::DoubleRounding::roundUp();
-            for(size_t i = 0; i<result.vectors_count;i++){
-                result.upper[i] = _mm256_min_pd(_mm256_div_pd(fst.lower[i],scalar1),_mm256_div_pd(fst.lower[i],scalar2));
-            }
-            return result;
-        }
         }
         return BatchSwitchMatrixAVX_Grouped ();
     }
@@ -796,12 +1224,11 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
         for (size_t row = 0; row < N; ++row) {
         os << "Row " << row << ": ";
         for (size_t vec = 0; vec < matrix.vectors_count_row; ++vec) {
-            // Pobierz indeks wektora
+            
             size_t index = row * matrix.vectors_count_row + vec;
 
-            // Pobierz elementy z __m256d
             alignas(32) double elements[4];
-            _mm256_store_pd(elements, matrix.upper[index]);
+            _mm256_store_pd(elements, matrix.lower[index]);
 
             os << "[";
             for (size_t i = 0; i < 4; ++i) {
@@ -817,14 +1244,19 @@ BatchSwitchMatrixAVX_Grouped<N, P> operator*(const BatchSwitchMatrixAVX_Grouped<
     }
 
     IntervalProxy<Accessor,Index> operator()(size_t j, size_t k){
-        Index ind(j*vectors_count_row+k/4,k%4);
+        Index ind(j*vectors_count_row+(k/4),k%4);
+        Accessor acc = {lower,upper};
+        return IntervalProxy<Accessor,Index>(acc,ind);
+    }
+    IntervalProxy<Accessor,Index> operator()(size_t j, size_t k) const{
+        Index ind(j*vectors_count_row+(k/4),k%4);
         Accessor acc = {lower,upper};
         return IntervalProxy<Accessor,Index>(acc,ind);
     }
    
     ~BatchSwitchMatrixAVX_Grouped(){
-        delete[] lower;
-        delete[] upper;
+        if(lower) delete[] lower;
+        if(upper) delete[] upper;
     }
 };
 namespace details{

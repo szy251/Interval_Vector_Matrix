@@ -2,31 +2,64 @@
 #include <iostream>
 #include <iomanip>
 #include <capd/intervals/Interval.hpp>
+#include<capd/filib/Interval.h>
 #include "VectorBasic.hpp"
 #include "MatrixBasic.hpp"
 #include <Interval.hpp>
 #include <capd/vectalg/Matrix.hpp>
 #include<chrono>
 #include<random>
+#include<BatchSwitchVector_Grouped.hpp>
 #include<BatchSwitchMatrix_Grouped.hpp>
 #include<BatchSwitchMatrixMixed.hpp>
 #include<BatchSwitchMatrixAVX_Grouped.hpp>
 #include<BatchSwitchMatrixAVX512_Grouped.hpp>
 #include<Utilities.hpp>
 
-void split_m512d_to_broadcasted_m512d(__m512d vector, __m512d scalars[8]) {
-    for (int i = 0; i < 8; ++i) {
-        // Wyciągamy odpowiedni element z wektora
-        double value = ((double*)&vector)[i]; // Pobieramy wartość `double` z pozycji `i`
 
-        // Tworzymy nowy wektor wypełniony tą wartością
-        scalars[i] = _mm512_set1_pd(value);
-    }
+// void split_m512d_to_broadcasted_m512d(__m512d vector, __m512d scalars[8]) {
+//     for (int i = 0; i < 8; ++i) {
+//         // Wyciągamy odpowiedni element z wektora
+//         double value = ((double*)&vector)[i]; // Pobieramy wartość `double` z pozycji `i`
+
+//         // Tworzymy nowy wektor wypełniony tą wartością
+//         scalars[i] = _mm512_set1_pd(value);
+//     }
+// }
+
+extern "C"  MatrixBasic<opt::Interval,304, 304> my_add_c(const  MatrixBasic<opt::Interval,304, 304>& a, const  MatrixBasic<opt::Interval,304, 304>& b) __attribute__((noinline));
+ MatrixBasic<opt::Interval,304, 304> my_add_c(const  MatrixBasic<opt::Interval,304, 304>& a, const  MatrixBasic<opt::Interval,304, 304>& b) {
+    return a * b;
 }
 
 
 
 int main() {
+
+    const size_t array_size = 304*304; 
+    auto intervals = generateArray(array_size,42);
+    
+    // Macierze 10x10
+    MatrixBasic<opt::Interval,304, 304> matrix(intervals);
+    //BatchSwitchMatrixMixed<304, 304> matrix2(intervals);
+    auto c = matrix;
+    //capd::filib::Interval<double> scalar(-2.,2.);
+
+
+   // auto a  = matrixExp(matrix,scalar,20);
+    auto b  = my_add_c(matrix,c);
+
+    // auto a =  matrix * matrix;
+    // a = a*matrix;
+
+    // auto b =  matrix2*matrix2;
+    // b = b * matrix2;
+
+    // if(b==a){
+    //     std::cout << "okej\n";
+    // }
+    // std::cout<< a << std::endl;
+    // std::cout<< b << std::endl;
 
 
     // __m512d vector = _mm512_set_pd(8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0);
@@ -45,34 +78,40 @@ int main() {
     //     }
     //     printf("\n");
     // }
-    static const size_t N = 300;
-    static const size_t M= 300;
-    const size_t array_size = N*M; // 10x10 macierz = 100 elementów
-    auto intervals = generateArray(array_size,42);
-    auto intervals2 = generateArray(array_size,143);
-    // Macierze 10x10
-    MatrixBasic<capd::intervals::Interval<double>, N, M> matrix1(intervals);
-    MatrixBasic<capd::intervals::Interval<double>, M, N> matrix2(intervals2);
+//     static const size_t N = 300;
+//     static const size_t M = 300;
+//     const size_t array_size = N*M; // 10x10 macierz = 100 elementów
+//     auto intervals = generateArray(array_size,42);
+//     auto intervals2 = generateArray(array_size,143);
+//    // Macierze 10x10
+//     MatrixBasic<capd::filib::Interval<double>, N, M> matrix1(intervals);
+//     MatrixBasic<capd::filib::Interval<double>, M, N> matrix2(intervals2);
+//     VectorBasic<opt::Interval,array_size> vec(intervals);
+//     std::vector<double> initial_values = {
+//         1.0, 2.0,  // Macierz 1 - rząd 1
+//         3.0, 4.0,  // Macierz 1 - rząd 2
+//         5.0, 6.0,  // Macierz 2 - rząd 1
+//         7.0, 8.0   // Macierz 2 - rząd 2
+//     };
+//     capd::filib::Interval<double> g(-2,2);
+//     BatchSwitchMatrixAVX_Grouped<M, N> mtr1(intervals);
+//     BatchSwitchMatrixAVX_Grouped<M, N> mtr2(intervals2);
+//     auto wyn  =  matrixExp(mtr1,g,20);
+     //auto mtr11 = mtr1* mtr2;
+//     //reorg(mtr1);
+//     //mtr3 = mtr3* mtr4;
+//     auto matrix11 = matrix1*matrix2;
 
-    BatchSwitchMatrixAVX512_Grouped<N, M> mtr1(intervals);
-    BatchSwitchMatrixAVX512_Grouped<M, N> mtr2(intervals2);
+//     std::cout << std::fixed << std::setprecision(17);
 
-    //BatchSwitchMatrixMixed<10,10> mtr3(intervals);
-    //BatchSwitchMatrixMixed<10,10> mtr4(intervals2);
+//    std::cout << mtr11(0,3) << " " << matrix11(0,3) << std::endl;
+//     if(mtr11==matrix11){
+//         std::cout << "dobrze" << std::endl;
+//     }
 
-    auto mtr11 = mtr1* mtr2;
-    //reorg(mtr1);
-    //mtr3 = mtr3* mtr4;
-    auto matrix11 = matrix1*matrix2;
+//     double tst = 0.1;
 
-    std::cout << std::fixed << std::setprecision(17);
-
-   std::cout << mtr11(0,3) << " " << matrix11(0,3) << std::endl;
-    if(mtr11==matrix11){
-        std::cout << "dobrze";
-    }
-
-
+//     std::cout << tst << std::endl;
 
 
     // auto intervals = generateArray(16*16,42);

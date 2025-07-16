@@ -2,30 +2,39 @@
 #define MATRIX_BASIC_HPP
 
 #include <iostream>
+#include <Interval.hpp>
 #include <EqualityComparable.hpp>
 
 
 template<typename T, size_t N, size_t M>
 class MatrixBasic{
     private:
-
     T* data = nullptr;
     template<typename U, size_t N1, size_t M1>
     friend class MatrixBasic;
 
+    void allocateImpl(std::true_type) {
+        data = static_cast<T*>(operator new[](N * M * sizeof(T)));
+    }
+
+    void allocateImpl(std::false_type) {
+        data = new T[N*M]();
+    }
     MatrixBasic(bool allocateOnly) {
         if (allocateOnly) {
-            data = static_cast<T*>(operator new[](N * M * sizeof(T))); // alokacja pamięci
+            allocateImpl(std::is_same<T, opt::Interval>{});
         } else {
             data = nullptr;
         }
     }
 public:
+    static constexpr size_t rows = N;
+    static constexpr size_t cols = M;
     MatrixBasic(){
         data = new T[N*M]();
     }
     MatrixBasic(const T& value) {
-        data = new T[N*M];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         for (size_t i = 0; i < N; ++i) {
             data[i] = value;
         }
@@ -35,11 +44,11 @@ public:
         if (values.size() != (N*M)) {
             throw std::invalid_argument("Initializer list size must match vector size.");
         }
-        data = new T[N*M];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         std::copy(values.begin(), values.end(), data);
     }
     MatrixBasic(double* ptr) {
-        data = new T[N*M];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         for (size_t i = 0; i < N*M; ++i) {
             if(ptr[2 * i] <=ptr[2 * i + 1])     data[i] = T(ptr[2 * i], ptr[2 * i + 1]);
             else                                data[i] = T(ptr[2 * i+1], ptr[2 * i]);
@@ -48,18 +57,18 @@ public:
 
     MatrixBasic(const std::vector<double>& vec) {
         if (vec.size() != 2 * N*M) {
-            throw std::invalid_argument("Vector size need to conatain 2*N*M doube.");
+            throw std::invalid_argument("Vector size need to conatain 2*N*M double.");
         }
 
-         data = new T[N*M]; 
-         for (size_t i = 0; i < N*M; ++i) {
+        allocateImpl(std::is_same<T, opt::Interval>{});
+        for (size_t i = 0; i < N*M; ++i) {
             data[i] = T(vec[2 * i], vec[2 * i + 1]);
-         }
+        }
     }
 
     MatrixBasic(const MatrixBasic& other) {
-        data = static_cast<T*>(operator new[](N * M * sizeof(T)));
-        for (size_t i = 0; i < N; ++i) {
+        allocateImpl(std::is_same<T, opt::Interval>{});
+        for (size_t i = 0; i < N*M; ++i) {
             data[i] = other.data[i];
         }
     }
@@ -70,14 +79,13 @@ public:
     }
 
     MatrixBasic(const T(&array)[N*M]) {
-        data = new T[N*M];
+        allocateImpl(std::is_same<T, opt::Interval>{});
         std::copy(std::begin(array), std::end(array), data);
     }
 
     ~MatrixBasic() {
-        if(!(data==nullptr)) {
+        if(data) {
             delete[] data;
-            data = nullptr;
         }
     }
 
@@ -112,25 +120,28 @@ public:
         return res;
     }
 
-    MatrixBasic<T, N, M>& operator=(const MatrixBasic<T, N, M>& fst) {
+    MatrixBasic& operator=(const MatrixBasic& fst) {
         if (this != &fst) {
-            delete[] data;  // Zwolnienie starej pamięci
-            data = new T[N * M];  // Alokacja nowej pamięci
+            delete[] data; 
+            allocateImpl(std::is_same<T, opt::Interval>{}); 
             for (size_t i = 0; i < N * M; ++i) {
-                data[i] = fst.data[i];  // Kopiowanie danych
+                data[i] = fst.data[i]; 
             }
         }
         return *this;
     }
 
-    MatrixBasic<T, N, M>& operator=(MatrixBasic<T, N, M>&& fst) noexcept {
+    MatrixBasic& operator=(MatrixBasic&& fst) noexcept {
         if (this != &fst) {
             delete[] data;
             data = fst.data;
-            fst.data = nullptr; 
+            fst.data = nullptr;
         }
         return *this;
     }
+
+    
+    
     MatrixBasic<T, N, M>& operator+=(const MatrixBasic<T, N, M>& fst) {
         for (size_t i = 0; i < N * M; ++i) {
             data[i] += fst.data[i];
@@ -143,8 +154,11 @@ public:
         }
         return *this;
     }
+
+    //rerganizacja danych mnożenie
+
     // template <size_t P>
-    // MatrixBasic<T, N, P> operator*(const MatrixBasic<T, M, P>& b) {
+    // MatrixBasic<T, N, P> operator*(const MatrixBasic<T, M, P>& b) const{
     //     MatrixBasic<T, N, P> result(true);
     //     MatrixBasic<T,P,M> pom = transposition(b);
 
@@ -161,24 +175,24 @@ public:
     //     return result;
     // }
 
+    //standard 
+
     template <size_t P>
-    MatrixBasic<T, N, P> operator*(const MatrixBasic<T, M, P>& b) {
-        MatrixBasic<T, N, P> result{};
+    MatrixBasic<T, N, P> operator*(const MatrixBasic<T, M, P>& b) const{
+        MatrixBasic<T, N, P> result;
 
         for (size_t i = 0; i < N; ++i) {
             for (size_t k = 0; k < M; ++k) {
-                T a_ik = (*this)(i, k); // Wyciągamy wartość z pierwszej macierzy, by uniknąć wielokrotnego dostępu
+                T a_ik = (*this)(i, k); 
                 for (size_t j = 0; j < P; ++j) {
-                    result(i, j) += a_ik * b(k, j); // Dodajemy wynik bez potrzeby tymczasowego "sum"
+                    result(i, j) += a_ik * b(k, j);
                 }
             }
         }
-
         return result;
     }
 
 
-    //Macierz i skalar
     MatrixBasic& operator=(const T& scl){
         for(size_t i = 0; i<N*M;i++){
             data[i]=scl;
@@ -264,6 +278,22 @@ public:
     }
     static constexpr size_t size() {
         return N * M;
+    }
+
+    friend std::ostream& operator<<(std::ostream & ost, const MatrixBasic & Mtr){
+        ost << "[ ";
+        for(size_t i = 0; i < N-1; i++){
+            for(size_t j=0 ; j< M; j++){
+                ost << Mtr(i,j) << " ";
+            }
+            ost << '\n' << "  ";
+        }
+        for(size_t j = 0; j< M; j++){
+            ost << Mtr(N-1,j) << " ";
+        }
+        ost<<"]";
+        return ost;
+
     }
     
 };

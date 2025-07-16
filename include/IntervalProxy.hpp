@@ -1,13 +1,13 @@
 #ifndef INTERVAL_PROXY_HPP
 #define INTERVAL_PROXY_HPP
 #include<iostream>
-#include<capd/intervals/Interval.hpp>
+#include<capd/filib/Interval.h>
 
 template<typename Accesor, typename Index>
 class IntervalProxy
 {
 private:
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     Accesor acc;
     Index index;
 public:

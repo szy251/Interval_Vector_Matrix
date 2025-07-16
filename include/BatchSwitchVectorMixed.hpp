@@ -2,7 +2,8 @@
 #define VECTOR_BATCH_HPP
 
 #include <iostream>
-#include <capd/intervals/Interval.h>
+#include <capd/rounding/DoubleRounding.h>
+#include <capd/filib/Interval.h>
 #include <Utilities.hpp>
 #include <IntervalProxy.hpp>
 
@@ -11,7 +12,7 @@ template<size_t N>
 class BatchSwitchVectorMixed
 {
 private:
-    typedef capd::intervals::Interval<double> Interval;
+    typedef capd::filib::Interval<double> Interval;
     double *data =  nullptr;
 
     struct Accessor {
@@ -55,7 +56,9 @@ public:
         }
 
         data = new double[2 * N]; 
-        std::copy(vec.begin(), vec.end(), data);
+        for(size_t i = 0; i < 2*N; i++){
+            data[i] = vec[i];
+        }
     }
 
     BatchSwitchVectorMixed& operator=(const BatchSwitchVectorMixed& fst) {
@@ -246,7 +249,7 @@ public:
                     {
                         double k = fst.data[i-1]*scd.leftBound();
                         if(fst.data[i] > 0. ){
-                            result.data[i] = std::min(k,fst.data[i]*scd.rightBound());
+                            result.data[i] = std::max(k,fst.data[i]*scd.rightBound());
                         }
                         else result.data[i] = k;
                     }
