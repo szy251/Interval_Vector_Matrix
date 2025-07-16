@@ -24,8 +24,7 @@ file(GLOB SOURCES src/main.cpp)
 include_directories(/usr/local/include)
 link_directories(/usr/local/lib)
 
-# Konfiguracja Google Benchmark
-find_package(benchmark REQUIRED) # Wymaga, aby benchmark był zainstalowany i dostępny
+
 find_package(capd REQUIRED)
 
 
@@ -34,6 +33,18 @@ add_executable(main ${SOURCES})
 
 # Linkowanie z biblioteką CAPD
 target_link_libraries(main capd::capd OpenMP::OpenMP_CXX)
+
+
+# --- Opcjonalne Benchmarki ---
+# Opcja do włączania/wyłączania budowania benchmarków. DOMYŚLNIE WYŁĄCZONE.
+option(BUILD_BENCHMARKS "Build the benchmark executables" OFF)
+
+
+# Buduj benchmarki tylko jeśli opcja jest włączona
+if(BUILD_BENCHMARKS)
+
+# Konfiguracja Google Benchmark
+find_package(benchmark REQUIRED) # Wymaga, aby benchmark był zainstalowany i dostępny
 
 # Dodanie benchmarków jako osobnego pliku wykonywalnego
 add_executable(benchmark_tests_matrix_mlt benchmark/matrix_speed_mlt.cpp)
@@ -89,3 +100,7 @@ target_link_libraries(benchmark_tests_matrix_multicore_sub benchmark::benchmark 
 target_link_libraries(benchmark_tests_matrix_multicore_div_scl benchmark::benchmark capd::capd OpenMP::OpenMP_CXX)
 target_link_libraries(benchmark_tests_matrix_multicore_mlt_scl benchmark::benchmark capd::capd OpenMP::OpenMP_CXX)
 target_link_libraries(benchmark_tests_matrix_multicore_mlt benchmark::benchmark capd::capd OpenMP::OpenMP_CXX)
+
+
+
+endif()

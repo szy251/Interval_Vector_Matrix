@@ -844,7 +844,6 @@ public:
             for(size_t j = 0; j<M;j++){
                 Interval interval = fst(i,j);
                 if(low[i*M+j] != interval.leftBound()||up[i*M+j]!=interval.rightBound()) {
-                    std::cout<< i << "," << j <<std::endl;
                     return false;
                 }
             }

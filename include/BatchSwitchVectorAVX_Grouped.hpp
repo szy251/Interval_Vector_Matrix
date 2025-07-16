@@ -33,7 +33,7 @@ private:
 
     struct Index{
         size_t ind;
-        uint8_t poz;
+        size_t poz;
     };
     struct Accessor {
         __m256d* lower,upper;
@@ -476,7 +476,21 @@ public:
         *this = *this / fst;
         return *this;
     }
+    bool operator==(const VectorBasic<Interval,N> & fst){
+        for(size_t i = 0; i <N; i++){
+                Interval interval = (*this)[i];
+                if(interval != fst[i]) {
+                    return false;
+                }
+            }
+        return true;
+    }
     IntervalProxy<Accessor, Index> operator[](size_t i){
+        Index index{i/4,i%4};
+        Accessor acc{lower,upper};
+        return IntervalProxy<Accessor,Index>(acc,index);
+    }
+    IntervalProxy<Accessor, Index> operator[](size_t i) const{
         Index index{i/4,i%4};
         Accessor acc{lower,upper};
         return IntervalProxy<Accessor,Index>(acc,index);
@@ -485,6 +499,15 @@ public:
     ~BatchSwitchVectorAVX_Grouped(){
         delete[] lower;
         delete[] upper;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const BatchSwitchVectorAVX_Grouped& vec) {
+        os << "( ";
+        for (size_t i = 0; i < N; ++i) {
+            os << vec[i] << " ";
+        }
+        os << ")";
+        return os;
     }
 };
 

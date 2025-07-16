@@ -1,187 +1,55 @@
 // main.cpp
 #include <iostream>
 #include <iomanip>
-#include <capd/intervals/Interval.hpp>
 #include<capd/filib/Interval.h>
-#include "VectorBasic.hpp"
-#include "MatrixBasic.hpp"
-#include <Interval.hpp>
-#include <capd/vectalg/Matrix.hpp>
-#include<chrono>
-#include<random>
-#include<BatchSwitchVector_Grouped.hpp>
-#include<BatchSwitchMatrix_Grouped.hpp>
-#include<BatchSwitchMatrixMixed.hpp>
-#include<BatchSwitchMatrixAVX_Grouped.hpp>
-#include<BatchSwitchMatrixAVX512_Grouped.hpp>
-#include<Utilities.hpp>
+#include <VecMacAll.hpp>
 
-
-// void split_m512d_to_broadcasted_m512d(__m512d vector, __m512d scalars[8]) {
-//     for (int i = 0; i < 8; ++i) {
-//         // Wyciągamy odpowiedni element z wektora
-//         double value = ((double*)&vector)[i]; // Pobieramy wartość `double` z pozycji `i`
-
-//         // Tworzymy nowy wektor wypełniony tą wartością
-//         scalars[i] = _mm512_set1_pd(value);
-//     }
-// }
-
-extern "C"  MatrixBasic<opt::Interval,304, 304> my_add_c(const  MatrixBasic<opt::Interval,304, 304>& a, const  MatrixBasic<opt::Interval,304, 304>& b) __attribute__((noinline));
- MatrixBasic<opt::Interval,304, 304> my_add_c(const  MatrixBasic<opt::Interval,304, 304>& a, const  MatrixBasic<opt::Interval,304, 304>& b) {
-    return a * b;
-}
-
+ typedef capd::filib::Interval<double> Interval;
 
 
 int main() {
+    //generowanie danych
+    const size_t wymiar = 10;
+    auto dane_vec = generateArray(wymiar,42);
+    auto dane_mtrx = generateArray(wymiar*wymiar,42);
+    auto skalar = Interval(-2.,6.);
 
-    const size_t array_size = 304*304; 
-    auto intervals = generateArray(array_size,42);
-    
-    // Macierze 10x10
-    MatrixBasic<opt::Interval,304, 304> matrix(intervals);
-    //BatchSwitchMatrixMixed<304, 304> matrix2(intervals);
-    auto c = matrix;
-    //capd::filib::Interval<double> scalar(-2.,2.);
+    //tworzenie wektorów z wygenerowanych danych
+    VectorBasic<Interval,wymiar> a(dane_vec);
+    BatchSwitchVectorAVX512_Grouped<wymiar> b(dane_vec);
 
+    //wypisywanie na standardowe wyjćsie
+    std::cout << a << std::endl;
+    std::cout << b << std::endl;
 
-   // auto a  = matrixExp(matrix,scalar,20);
-    auto b  = my_add_c(matrix,c);
+    //dodawanie wektorów
+    auto ga = a+a;
+    auto gb = b+b;
 
-    // auto a =  matrix * matrix;
-    // a = a*matrix;
+    std::cout << std::endl;
+    //porównywanie wektorów
+    if(ga==gb) std::cout << "Równe wekotry\n";
 
-    // auto b =  matrix2*matrix2;
-    // b = b * matrix2;
-
-    // if(b==a){
-    //     std::cout << "okej\n";
-    // }
-    // std::cout<< a << std::endl;
-    // std::cout<< b << std::endl;
-
-
-    // __m512d vector = _mm512_set_pd(8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0);
-
-    // // Tablica na 8 nowych wektorów
-    // __m512d scalars[8];
-
-    // // Rozdzielamy wektor na 8 wektorów
-    // split_m512d_to_broadcasted_m512d(vector, scalars);
-
-    // // Wypisujemy wartości
-    // for (int i = 0; i < 8; ++i) {
-    //     printf("Vector %d: ", i);
-    //     for (int j = 0; j < 8; ++j) {
-    //         printf("%f ", ((double*)&scalars[i])[j]);
-    //     }
-    //     printf("\n");
-    // }
-//     static const size_t N = 300;
-//     static const size_t M = 300;
-//     const size_t array_size = N*M; // 10x10 macierz = 100 elementów
-//     auto intervals = generateArray(array_size,42);
-//     auto intervals2 = generateArray(array_size,143);
-//    // Macierze 10x10
-//     MatrixBasic<capd::filib::Interval<double>, N, M> matrix1(intervals);
-//     MatrixBasic<capd::filib::Interval<double>, M, N> matrix2(intervals2);
-//     VectorBasic<opt::Interval,array_size> vec(intervals);
-//     std::vector<double> initial_values = {
-//         1.0, 2.0,  // Macierz 1 - rząd 1
-//         3.0, 4.0,  // Macierz 1 - rząd 2
-//         5.0, 6.0,  // Macierz 2 - rząd 1
-//         7.0, 8.0   // Macierz 2 - rząd 2
-//     };
-//     capd::filib::Interval<double> g(-2,2);
-//     BatchSwitchMatrixAVX_Grouped<M, N> mtr1(intervals);
-//     BatchSwitchMatrixAVX_Grouped<M, N> mtr2(intervals2);
-//     auto wyn  =  matrixExp(mtr1,g,20);
-     //auto mtr11 = mtr1* mtr2;
-//     //reorg(mtr1);
-//     //mtr3 = mtr3* mtr4;
-//     auto matrix11 = matrix1*matrix2;
-
-//     std::cout << std::fixed << std::setprecision(17);
-
-//    std::cout << mtr11(0,3) << " " << matrix11(0,3) << std::endl;
-//     if(mtr11==matrix11){
-//         std::cout << "dobrze" << std::endl;
-//     }
-
-//     double tst = 0.1;
-
-//     std::cout << tst << std::endl;
+    //monżenie wektora przez skalar
+    gb *= skalar;
 
 
-    // auto intervals = generateArray(16*16,42);
-    // BatchSwitchMatrixAVX512_Grouped<16,16> mtrx(intervals);
-    // std::cout << mtrx <<std::endl;
-    // std::cout << reorg(mtrx) <<std::endl;
-    // std::cout << std::endl;
-    // __m256d low = _mm256_set1_pd(7);
-    // double a[] {1,2,3,4,5,6,7,8};
-    // __m512d vec_lower = _mm512_loadu_pd(a);
-    // double jo = _mm256_cvtsd_f64(_mm256_permutex_pd(_mm512_extractf64x4_pd(vec_lower,1),0b00000011));
-    // std::cout << jo << " " << jo << " " << a[2] << " " << a[3] << std::endl;
- //     size_t num_elements = 2e6;  // 2 miliony
-//     double* arr = new double[num_elements];
+    //tworzenie macierzy z wygenerowanych danych
+    MatrixBasic<Interval,wymiar,wymiar> c(dane_mtrx);
+    BatchSwitchMatrixAVX_Grouped<wymiar,wymiar> d(dane_mtrx);
 
-//     // Ustawienie generatora liczb losowych
-//     std::random_device rd;  // Generator liczb losowych
-//     std::mt19937 gen(rd()); // Mersenne Twister (wydajny generator)
-//     std::uniform_real_distribution<> dis(-1000.0, 1000.0); // Rozkład losowy w zakresie [-1000, 1000]
 
-//     // Inicjalizowanie tablicy losowymi wartościami
-//     for (size_t i = 0; i < num_elements; ++i) {
-//         arr[i] = dis(gen);  // Losowa liczba zmiennoprzecinkowa
-//     }
+    //możenie macierzy
+    auto gc = c*c;
+    auto gd = d*d;
 
-//     // Wypisujemy pierwsze 10 elementów tablicy jako przykład
-//     for (size_t i = 0; i < 10; ++i) {
-//         std::cout << arr[i] << " ";
-//     }
-//     std::cout << std::endl;
+    //eksponenta macierzy
+    gc = matrixExp(gc, skalar, 20);
+    gd =  matrixExp(gd, skalar, 20);
 
-//     opt::Interval hh(1.0,2.0);
-//     opt::Interval cc(2.5,3.0);
-//     opt::Interval gg = hh*cc;
-//     hh.print();
-//     // Definicja przedziałów
-//     auto A = capd::intervals::Interval<double> ();
-//     capd::intervals::Interval<double> B(3.0, 4.0);
-//     capd::intervals::Interval<double,capd::rounding::DoubleRounding> e(2.5,3.0);
-//     auto b = MatrixBasic<decltype(e),1000,1000>(arr);
-//     auto c = MatrixBasic<decltype(cc),1000,1000>(arr);
-//     capd::rounding::DoubleRounding l;
-//     l.roundUp();
-//     auto d = c-c;
-//     auto start1 = std::chrono::high_resolution_clock::now();
-//     auto result1 = d + c;
-//     auto result2 = c * d;
-//     auto end1 = std::chrono::high_resolution_clock::now();
-//     auto duration1 = duration_cast<std::chrono::microseconds>(end1 - start1);
-//     std::cout << "C + C czas: " << duration1.count() << " mikrosekund\n";
-//     // Pomiar czasu dla drugiej pętli (e + e)
-//      auto u = b-b;
-//     auto start2 = std::chrono::high_resolution_clock::now();
-//     auto result3 = u+b;
-//     auto result4 = b*u;
-//     auto end2 = std::chrono::high_resolution_clock::now();
-//     auto duration2 = duration_cast<std::chrono::microseconds>(end2 - start2);
-//     std::cout << "B + B czas: " << duration2.count() << " mikrosekund\n";
-//     delete[] arr;
-//    // std::cout << (c==b) << std::endl;
-//     // Dodawanie przedziałów
-//     capd::intervals::Interval<double> C = A * B;
+    //porównanie macierzy
+    if(gd==gc) std::cout << "Równe macierze\n";
 
-//     // Wydrukowanie wyniku
-//     std::cout << std::fixed << std::setprecision(17);
-//     //std::cout << "   e(\"2.5\",\"3\") = " << (result2 == result4)<< std::endl;
-//     capd::rounding::DoubleRounding a;
-//     a.roundNearest();
-//     std::cout << a.test() << std::endl;
-//     std::cout << 2.0/3.0 << std::endl;
 
     return 0;
 }

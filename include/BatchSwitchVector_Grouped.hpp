@@ -361,6 +361,16 @@ public:
         *this = *this * fst;
         return *this;
     }
+
+    bool operator==(const VectorBasic<Interval,N> & fst){
+        for(size_t i = 0; i <N; i++){
+                Interval interval = (*this)[i];
+                if(interval != fst[i]) {
+                    return false;
+                }
+            }
+        return true;
+    }
     BatchSwitchVector_Grouped & operator/=(const Interval& fst){
         *this = *this / fst;
         return *this;
@@ -369,10 +379,23 @@ public:
         Accessor acc{low, up};
         return IntervalProxy<Accessor,size_t>(acc,index);
     }
+    IntervalProxy<Accessor,size_t> operator[](size_t index) const{
+        Accessor acc{low, up};
+        return IntervalProxy<Accessor,size_t>(acc,index);
+    }
 
     ~BatchSwitchVector_Grouped() {
         delete[] low;
         delete[] up;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const BatchSwitchVector_Grouped& vec) {
+        os << "( ";
+        for (size_t i = 0; i < N; ++i) {
+            os << vec.data[i] << " ";
+        }
+        os << ")";
+        return os;
     }
 };
 

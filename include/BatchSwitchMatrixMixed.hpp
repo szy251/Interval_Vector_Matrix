@@ -891,6 +891,18 @@ template <size_t P>
         return *this;
     }
 
+    bool operator==(const MatrixBasic<Interval,N,M> & fst){
+        for(size_t i = 0; i <N; i++){
+            for(size_t j = 0; j < M; j++){
+                Interval interval = (*this)(i,j);
+                if(interval != fst(i,j)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     IntervalProxy<Accessor,size_t> operator()(size_t j, size_t k){
         Accessor acc = {data};
         size_t ind = (j*M+k)*2;
@@ -903,6 +915,22 @@ template <size_t P>
     }
     ~BatchSwitchMatrixMixed(){
         delete[] data;
+    }
+
+    friend std::ostream& operator<<(std::ostream & ost, const BatchSwitchMatrixMixed & Mtr){
+        ost << "[ ";
+        for(size_t i = 0; i < N-1; i++){
+            for(size_t j=0 ; j< M; j++){
+                ost << Mtr(i,j) << " ";
+            }
+            ost << '\n' << "  ";
+        }
+        for(size_t j = 0; j< M; j++){
+            ost << Mtr(N-1,j) << " ";
+        }
+        ost<<"]";
+        return ost;
+
     }
 };
 

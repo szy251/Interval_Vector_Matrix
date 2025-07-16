@@ -32,7 +32,7 @@ private:
     }
     struct Index{
         size_t ind;
-        uint8_t poz;
+        size_t poz;
     };
     struct Accessor {
     __m512d* lower, * upper;
@@ -61,7 +61,7 @@ private:
             break;
         case 3:
             low_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_lower,0b00000011));
-            upp_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_lower,0b00000011));
+            upp_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_upper,0b00000011));
             break;
         case 2:
             low_val = _mm512_cvtsd_f64(_mm512_permutex_pd(vec_lower,0b00000010));
@@ -493,10 +493,38 @@ public:
         *this = *this / fst;
         return *this;
     }
+    bool operator==(const VectorBasic<Interval,N> & fst){
+        for(size_t i = 0; i <N; i++){
+                Interval interval = (*this)[i];
+                if(interval != fst[i]) {
+                    return false;
+                }
+            }
+        return true;
+    }
+    IntervalProxy<Accessor, Index> operator[](size_t i){
+        Index index{i/8,i%8};
+        Accessor acc{lower,upper};
+        return IntervalProxy<Accessor,Index>(acc,index);
+    }
+    IntervalProxy<Accessor, Index> operator[](size_t i) const{
+        Index index{i/8,i%8};
+        Accessor acc{lower,upper};
+        return IntervalProxy<Accessor,Index>(acc,index);
+    }
 
     ~BatchSwitchVectorAVX512_Grouped() {
         delete[] lower;
         delete[] upper;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const BatchSwitchVectorAVX512_Grouped& vec) {
+        os << "( ";
+        for (size_t i = 0; i < N; ++i) {
+            os << vec[i] << " ";
+        }
+        os << ")";
+        return os;
     }
 };
 

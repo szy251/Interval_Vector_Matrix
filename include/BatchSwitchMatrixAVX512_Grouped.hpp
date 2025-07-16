@@ -62,7 +62,7 @@ private:
 
     struct Index{
         size_t ind;
-        uint8_t poz;
+        size_t poz;
     };
     struct Accessor {
     __m512d* lower, * upper;
@@ -1345,7 +1345,6 @@ friend BatchSwitchMatrixAVX512_Grouped operator-(const BatchSwitchMatrixAVX512_G
             for(size_t j = 0; j < M; j++){
                 Interval interval = (*this)(i,j);
                 if(interval != fst(i,j)) {
-                    std::cout << i << " " << j << std::endl;
                     return false;
                 }
             }

@@ -346,13 +346,35 @@ public:
         *this = *this / fst;
         return *this;
     }
+    bool operator==(const VectorBasic<Interval,N> & fst){
+        for(size_t i = 0; i <N; i++){
+                Interval interval = (*this)[i];
+                if(interval != fst[i]) {
+                    return false;
+                }
+            }
+        return true;
+    }
     IntervalProxy<Accessor,size_t> operator[](size_t index) {
+        Accessor accessor = {data};
+        return IntervalProxy<Accessor,size_t>(accessor, index);
+    }
+    IntervalProxy<Accessor,size_t> operator[](size_t index) const{
         Accessor accessor = {data};
         return IntervalProxy<Accessor,size_t>(accessor, index);
     }
 
     ~BatchSwitchVectorMixed(){
         delete[] data;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const BatchSwitchVectorMixed& vec) {
+        os << "( ";
+        for (size_t i = 0; i < N; ++i) {
+            os << vec[i] << " ";
+        }
+        os << ")";
+        return os;
     }
 };
 
